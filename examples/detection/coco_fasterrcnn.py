@@ -10,7 +10,7 @@ import torch
 # Parameters
 BATCH_SIZE = 8
 NUM_WORKERS = 4
-DATA_ROOT = '/home/knakamura/Programs/Python/torch-benchmarks/object_detection/datasets/COCO'
+DATA_ROOT = 'datasets/COCO'
 
 # Select the device
 DEVICE = 'cuda'
