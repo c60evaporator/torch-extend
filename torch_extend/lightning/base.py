@@ -4,10 +4,11 @@ import lightning.pytorch as pl
 from abc import ABC, abstractmethod
 
 class TorchVisionModule(pl.LightningModule, ABC):
-    def __init__(self, criterion=None,
+    def __init__(self, model_name, criterion=None,
                  pretrained=False, tuned_layers=None,
                  first_epoch_lr_scheduled = False):
         super().__init__()
+        self.model_name = model_name
         # Save the criterion
         if criterion is not None:
             self.criterion = criterion

@@ -12,6 +12,7 @@ from ..metrics.detection import iou_object_detection, extract_cofident_boxes
 def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
                         colors=None, fill=False, width=1,
                         font=None, font_size=None,
+                        anomaly_indices=None,
                         ax=None):
     """
     Show the image with the segmentation.
@@ -40,6 +41,10 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
         `/System/Library/Fonts/` and `~/Library/Fonts/` on macOS.
     font_size : int
         The requested font size in points.
+    anomaly_indices : int
+        Anomaly box indices displayed as crosses.
+    ax : matplotlib axes, default=None
+        Axes object to plot on. If `None`, a new figure and axes is created.
     """
     # If ax is None, use matplotlib.pyplot.gca()
     if ax is None:
@@ -53,6 +58,12 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
                                            font=font, font_size=font_size)
     image_with_boxes = image_with_boxes.permute(1, 2, 0)  # Change axis order from (ch, x, y) to (x, y, ch)
     ax.imshow(image_with_boxes)
+    # Draw Anomaly boxes
+    if anomaly_indices is not None:
+        for idx in anomaly_indices:
+            ax.plot(boxes[idx][0], boxes[idx][1], marker='X', markersize=6, color = 'red') #　Anomaly topleft
+            plt.text(boxes[idx][0], boxes[idx][1], labels[idx], color='red', fontsize=8)
+            ax.plot(boxes[idx][2], boxes[idx][3], marker='X', markersize=6, color = 'red') #　Anomaly bottomright
 
 def show_pred_true_boxes(image, 
                          boxes_pred, labels_pred,

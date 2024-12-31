@@ -86,5 +86,8 @@ class CocoDetectionTV(CocoDetection, DetectionOutput):
             else:
                 converted_target = self._convert_target(boxes, labels, id)
                 image, target = self.transforms(image, converted_target)
+        # No transformation
+        else:
+            target = self._convert_target(boxes, labels, id)
 
         return image, target

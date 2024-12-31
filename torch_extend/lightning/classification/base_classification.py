@@ -4,14 +4,14 @@ from abc import abstractmethod
 
 from ..base import TorchVisionModule
 
-class DetectionModule(TorchVisionModule):
+class ClassificationModule(TorchVisionModule):
     def __init__(self, class_to_idx: dict[str, int],
-                 criterion=None,
+                 model_name, criterion=None,
                  pretrained=True, tuned_layers=None,
-                 opt_name='sgd', lr=0.02, momentum=0.9, weight_decay=1e-4,
-                 lr_scheduler='steplr', lr_step_size=8, lr_steps=[16, 22], lr_gamma=0.1,
+                 opt_name='sgd', lr=0.1, momentum=0.9, weight_decay=1e-4,
+                 lr_scheduler='steplr', lr_step_size=30, lr_gamma=0.1,
                  epochs = None):
-        super().__init__(criterion, pretrained, tuned_layers, False)
+        super().__init__(model_name, criterion, pretrained, tuned_layers, False)
         # Class to index dict
         self.class_to_idx = class_to_idx
         # Index to class dict
@@ -30,7 +30,6 @@ class DetectionModule(TorchVisionModule):
         # Learning scheduler parameters
         self.lr_scheduler = lr_scheduler
         self.lr_step_size = lr_step_size
-        self.lr_steps = lr_steps
         self.lr_gamma = lr_gamma
         # Set the number of epochs and batches for lr_scheduler
         self.epochs = epochs
@@ -58,10 +57,11 @@ class DetectionModule(TorchVisionModule):
         inputs, targets = batch
         outputs = self.model(inputs)
         return self.criterion(outputs, targets)
-
+    
+    @property
     def default_criterion(self):
         """Default criterion (Sum of all the losses)"""
-        return nn.CrossEntropyLoss(label_smoothing=0.0)
+        return nn.CrossEntropyLoss()
     
     ###### Validation ######
     def validation_step(self, batch, batch_idx):
@@ -79,7 +79,6 @@ class DetectionModule(TorchVisionModule):
         self.i_epoch += 1
 
     ###### Test ######
-    @abstractmethod
     def test_step(self, batch, batch_idx):
         loss = self.calc_train_loss(batch)
         # Record the loss
@@ -110,7 +109,7 @@ class DetectionModule(TorchVisionModule):
         # lr_schedulers
         self.schedulers = []
         if self.lr_scheduler == "steplr":
-            self.schedulers.append(torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.lr_steps, gamma=self.lr_gamma))
+            self.schedulers.append(torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.lr_step_size, gamma=self.lr_gamma))
         elif self.lr_scheduler == "cosineannealinglr":
             if self.epochs is None:
                 raise RuntimeError(f'The `epochs` argument should be specified if "cosineannealinglr" is selected as the lr_scheduler.')
@@ -118,6 +117,6 @@ class DetectionModule(TorchVisionModule):
         elif self.lr_scheduler == "exponentiallr":
             self.schedulers.append(torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=self.lr_gamma))
         else:
-            raise RuntimeError(f'Invalid lr_scheduler {self.lr_scheduler}. Only "multisteplr", "cosineannealinglr", and "exponentiallr" are supported.')
+            raise RuntimeError(f'Invalid lr_scheduler {self.lr_scheduler}. Only "steplr", "cosineannealinglr", and "exponentiallr" are supported.')
 
         return optimizer

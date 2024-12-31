@@ -7,13 +7,13 @@ from ...metrics.detection import average_precisions
 
 class DetectionModule(TorchVisionModule):
     def __init__(self, class_to_idx: dict[str, int],
-                 criterion=None,
+                 model_name, criterion=None,
                  pretrained=True, tuned_layers=None,
                  first_epoch_lr_scheduled=True,
                  opt_name='sgd', lr=0.02, momentum=0.9, weight_decay=1e-4,
                  lr_scheduler='multisteplr', lr_step_size=8, lr_steps=[16, 22], lr_gamma=0.1,
                  epochs=None, n_batches=None):
-        super().__init__(criterion, pretrained, tuned_layers, first_epoch_lr_scheduled)
+        super().__init__(model_name, criterion, pretrained, tuned_layers, first_epoch_lr_scheduled)
         # Class to index dict
         self.class_to_idx = class_to_idx
         # Index to class dict
@@ -93,10 +93,13 @@ class DetectionModule(TorchVisionModule):
 
     def on_test_epoch_end(self):
         """Epoch end processes during the test"""
+        # Index to class names dict with background
+        idx_to_class_bg = {k: v for k, v in self.idx_to_class.items()}
+        idx_to_class_bg[-1] = 'background'
         # Calculate Average Precision
         aps = average_precisions(self.test_step_preds, self.test_step_targets,
-                                self.idx_to_class, 
-                                iou_threshold=0.5, conf_threshold=0.0)
+                                 idx_to_class_bg,
+                                 iou_threshold=0.5, conf_threshold=0.0)
         mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
         print(f'mAP={mean_average_precision}')
         self.test_step_targets = []
