@@ -1,4 +1,5 @@
-#%% Select the device
+#%% Select the device and hyperparameters
+###### 1. Select the device and hyperparameters ######
 import os
 import sys
 # Add the root directory of the repository to system pathes (For debugging)
@@ -7,11 +8,11 @@ sys.path.append(ROOT)
 
 import torch
 
-# Parameters
-EPOCHS = 1
-BATCH_SIZE = 8
+# General Parameters
+EPOCHS = 40
+BATCH_SIZE = 128
 NUM_WORKERS = 4
-DATA_ROOT = './datasets/COCO'
+DATA_ROOT = './datasets/CIFAR10'
 # Optimizer Parameters
 OPT_NAME = 'sgd'
 LR = 0.05
@@ -28,9 +29,7 @@ LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
-# Metrics Parameters
-AP_IOU_THRESHOLD = 0.5
-AP_CONF_THRESHOLD = 0.01
+DROPOUT = 0.5
 
 # Select the device
 DEVICE = 'cuda'
@@ -47,72 +46,75 @@ torch.manual_seed(42)
 ###### 2. Define the transforms ######
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+import cv2
 
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD = [0.229, 0.224, 0.225]
-# Transforms for training
-transforms = A.Compose([
-    A.Resize(640, 640),  # Resize the image to (640, 640)
-    A.Normalize(IMAGENET_MEAN, IMAGENET_STD),  # Normalization (mean and std of the imagenet dataset for normalizing)
+# Transforms for training (https://www.kaggle.com/code/zlanan/cifar10-high-accuracy-model-build-on-pytorch)
+train_transform = A.Compose([
+    A.Resize(32,32),
+    A.HorizontalFlip(),
+    A.Rotate(limit=5, interpolation=cv2.INTER_NEAREST),
+    A.Affine(rotate=0, shear=10, scale=(0.9,1.1)),
+    A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    A.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ToTensorV2()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
-], bbox_params=A.BboxParams(format='coco', label_fields=['class_labels']))
+])
+# Transforms for validation and test (https://www.kaggle.com/code/zlanan/cifar10-high-accuracy-model-build-on-pytorch)
+eval_transform = A.Compose([
+    A.Resize(32,32),
+    A.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ToTensorV2()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
+])
 
-# %% Define the Dataset
-# Define the dataset
+# %% Define the dataset
+###### 3. Define the dataset ######
+from torch_extend.dataset.classification.cifar import CIFAR10TV
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset.detection.coco import CocoDetectionTV
-from torch_extend.display.detection import show_bounding_boxes
-
 # Dataset
-TRAIN_ANNFILE='./datasets/COCO/instances_train_filtered.json'
-VAL_ANNFILE='./datasets/COCO/instances_val_filtered.json'
-train_dataset = CocoDetectionTV(
-    f'{DATA_ROOT}/train2017',
-    annFile=TRAIN_ANNFILE,
-    transforms=transforms
+train_dataset = CIFAR10TV(
+    DATA_ROOT,
+    train=True,
+    transform=train_transform,
+    target_transform=None,
+    download=True
 )
-val_dataset = CocoDetectionTV(
-    f'{DATA_ROOT}/val2017',
-    annFile=VAL_ANNFILE,
-    transforms=transforms
+val_dataset = CIFAR10TV(
+    DATA_ROOT,
+    train=False,
+    transform=eval_transform,
+    target_transform=None,
+    download=True
 )
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
-idx_to_class = {v: k for k, v in class_to_idx.items()}
-na_cnt = 0
-for i in range(max(class_to_idx.values())):
-    if i not in class_to_idx.values():
-        na_cnt += 1
-        idx_to_class[i] = f'NA{"{:02}".format(na_cnt)}'
+idx_to_class = {v: k for k, v in train_dataset.class_to_idx.items()}
+
 
 # Dataloader
-def collate_fn(batch):
-    return tuple(zip(*batch))
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
-                              shuffle=True, num_workers=NUM_WORKERS,
-                              collate_fn=collate_fn)
+                              shuffle=True, num_workers=NUM_WORKERS)
 val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
-                            shuffle=True, num_workers=NUM_WORKERS,
-                            collate_fn=collate_fn)
+                            shuffle=False, num_workers=NUM_WORKERS)
 
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
+    # If ax is None, use matplotlib.pyplot.gca()
+    if ax is None:
+        ax=plt.gca()
     # Denormalize the image
     denormalize_image = v2.Compose([
-        v2.Normalize(mean=[-mean/std for mean, std in zip(IMAGENET_MEAN, IMAGENET_STD)],
-                    std=[1/std for std in IMAGENET_STD])
+        v2.Normalize(mean=[-mean/std for mean, std in zip((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))],
+                     std=[1/std for std in (0.5, 0.5, 0.5)])
     ])
     img = denormalize_image(img)
     # Show the image
-    img = (img*255).to(torch.uint8)  # Change from float[0, 1] to uint[0, 255]
-    boxes, labels = target['boxes'], target['labels']
-    show_bounding_boxes(img, boxes, labels=labels,
-                        idx_to_class=idx_to_class, ax=ax)
+    img_permute = img.permute(1, 2, 0)
+    ax.imshow(img_permute)
+    ax.set_title(f'label: {idx_to_class[target.item()]}')
 
 train_iter = iter(train_dataloader)
 imgs, targets = next(train_iter)
@@ -121,23 +123,42 @@ for i, (img, target) in enumerate(zip(imgs, targets)):
     plt.show()
 
 # %% Define the model
-# Define the model
-from torchvision.models.detection import faster_rcnn
+###### 4. Define the model ######
+from torch import nn
 
-model = faster_rcnn.fasterrcnn_resnet50_fpn(weights=faster_rcnn.FasterRCNN_ResNet50_FPN_Weights.COCO_V1)
-# Freeze the parameters
-for name, param in model.named_parameters():
-    param.requires_grad = False
-# Replace layers for transfer learning
-num_classes = max(class_to_idx.values()) + 1
-in_features = model.roi_heads.box_predictor.cls_score.in_features
-model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
+class LeNet(nn.Module):
+    """LeNet model for CIFAR-10 (https://www.kaggle.com/code/vikasbhadoria/cifar10-high-accuracy-model-build-on-pytorch)"""
+    def __init__(self, dropout=0.5):
+        super().__init__()
+        self.fetrures = nn.Sequential(
+            nn.Conv2d(3, 16, 3, 1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(16, 32, 3, 1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(32, 64, 3, 1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(4*4*64, 500),
+            nn.ReLU(inplace=False),
+            nn.Dropout(dropout),
+            nn.Linear(500, 10)
+        )
+    def forward(self, x):
+      x = self.fetrures(x)
+      x = x.view(-1, 4*4*64)
+      x = self.classifier(x)
+      return x
+
+model = LeNet(dropout=DROPOUT)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
-# Criterion (Sum of all the losses)
-def criterion(loss_dict):
-    return sum(loss for loss in loss_dict.values())
+# Criterion
+criterion = nn.CrossEntropyLoss()
 # Optimizer (Reference https://github.com/pytorch/vision/blob/main/references/classification/train.py)
 parameters = [p for p in model.parameters() if p.requires_grad]
 if OPT_NAME.startswith("sgd"):
@@ -164,22 +185,18 @@ elif LR_SCHEDULER == "cosineannealinglr":
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=LR_T_MAX)
 elif LR_SCHEDULER == "reducelronplateau":
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=LR_GAMMA, patience=LR_PATIENCE)
-
+        
 # %% Training and Validation loop
 ###### 6. Training and Validation loop ######
 import time
 from tqdm import tqdm
-import numpy as np
-
-from torch_extend.metrics.detection import average_precisions
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
-    inputs = [img.to(device) for img in batch[0]]
-    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
-                for t in batch[1]]
-    loss_dict = model(inputs, targets)
-    return criterion(loss_dict)
+    inputs, targets = batch[0].to(device), batch[1].to(device)
+    outputs = model(inputs)
+    return criterion(outputs, targets)
 
 def training_step(batch, batch_idx, device, model, criterion):
     """Training step per batch"""
@@ -188,19 +205,17 @@ def training_step(batch, batch_idx, device, model, criterion):
 
 def get_preds_cpu(inputs, model):
     """Get the predictions and store them to CPU as a list"""
-    return [{k: v.cpu() for k, v in pred.items()} 
-            for pred in model(inputs)]
+    return [pred.cpu() for pred in model(inputs)]
 
 def get_targets_cpu(targets):
     """Get the targets and store them to CPU as a list"""
-    return [{k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in target.items()}
-            for target in targets]
+    return [target.item() for target in targets]
 
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
     """Validation step per batch"""
     # Calculate the loss
-    loss = None
+    loss = calc_train_loss(batch, model, criterion, device)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(batch[0].to(device), model))
     val_batch_targets.extend(get_targets_cpu(batch[1]))
@@ -208,15 +223,16 @@ def validation_step(batch, batch_idx, device, model, criterion,
 
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
-    # Calculate the mean Average Precision
-    aps = average_precisions(preds, targets,
-                             idx_to_class, 
-                             iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
-    mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
-    global last_aps
-    last_aps = aps
-    print(f'mAP={mean_average_precision}')
-    return {'mAP': mean_average_precision}
+    # Calculate the accuracy, precision, recall, and f1 score
+    predicted_labels = [torch.argmax(pred).item() for pred in preds]
+    accuracy = accuracy_score(targets, predicted_labels)
+    precision_macro = precision_score(targets, predicted_labels, average='macro')
+    recall_macro = recall_score(targets, predicted_labels, average='macro')
+    f1_macro = f1_score(targets, predicted_labels, average='macro')
+    return {'accuracy': accuracy,
+            'precision_macro': precision_macro,
+            'recall_macro': recall_macro,
+            'f1_macro': f1_macro}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -267,14 +283,15 @@ start = time.time()
 for i_epoch in range(EPOCHS):
     # Train one epoch
     train_step_losses = train_one_epoch(train_dataloader, device, model,
-                                         criterion, optimizer, lr_scheduler)
+                                        criterion, optimizer, lr_scheduler)
     # Calculate the average loss
     train_loss_epoch = sum(train_step_losses) / len(train_step_losses)
     train_epoch_losses.append(train_loss_epoch)
     # Validate one epoch
     val_step_losses, val_metrics_epoch = val_one_epoch(val_dataloader, device, model,
-                                                criterion)
+                                                       criterion)
     # Calculate the average loss
+    val_loss_epoch = None
     if len(val_step_losses) > 0:
         val_loss_epoch = sum(val_step_losses) / len(val_step_losses)
         val_epoch_losses.append(val_loss_epoch)
@@ -309,29 +326,3 @@ for i, metric_name in enumerate(val_metrics_all[0].keys()):
     axes[i+1].set_title(f'Validation {metric_name}')
 fig.tight_layout()
 plt.show()
-
-#%% Plot Average Precisions
-# Plot Average Precisions
-from torch_extend.display.detection import show_average_precisions
-
-# def plot_average_precisions(loader):
-#     """Plot the average precisions"""
-#     torch.set_grad_enabled(False)
-#     model.eval()
-#     batch_preds = []
-#     batch_targets = []
-#     with tqdm(loader, unit="batches") as tepoch:
-#         for batch_idx, batch in enumerate(tepoch):
-#             # Store the predictions and targets for calculating metrics
-#             inputs = [img.to(device) for img in batch[0]]
-#             targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
-#                         for t in batch[1]]
-#             batch_preds.extend(get_preds_cpu(inputs, model))
-#             batch_targets.extend(get_targets_cpu(targets))
-#     # Calculate average precisions
-#     aps = average_precisions(batch_preds, batch_targets,
-#                              idx_to_class, 
-#                              iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
-#     show_average_precisions(aps)
-
-show_average_precisions(last_aps)

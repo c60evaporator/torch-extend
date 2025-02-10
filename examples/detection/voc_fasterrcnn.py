@@ -8,10 +8,10 @@ sys.path.append(ROOT)
 import torch
 
 # Parameters
-EPOCHS = 1
+EPOCHS = 10
 BATCH_SIZE = 8
 NUM_WORKERS = 4
-DATA_ROOT = './datasets/COCO'
+DATA_ROOT = './datasets/VOC2012'
 # Optimizer Parameters
 OPT_NAME = 'sgd'
 LR = 0.05
@@ -55,7 +55,7 @@ transforms = A.Compose([
     A.Resize(640, 640),  # Resize the image to (640, 640)
     A.Normalize(IMAGENET_MEAN, IMAGENET_STD),  # Normalization (mean and std of the imagenet dataset for normalizing)
     ToTensorV2()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
-], bbox_params=A.BboxParams(format='coco', label_fields=['class_labels']))
+], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
 # %% Define the Dataset
 # Define the dataset
@@ -63,31 +63,18 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset.detection.coco import CocoDetectionTV
+from torch_extend.dataset.detection.voc import VOCDetectionTV
 from torch_extend.display.detection import show_bounding_boxes
 
 # Dataset
-TRAIN_ANNFILE='./datasets/COCO/instances_train_filtered.json'
-VAL_ANNFILE='./datasets/COCO/instances_val_filtered.json'
-train_dataset = CocoDetectionTV(
-    f'{DATA_ROOT}/train2017',
-    annFile=TRAIN_ANNFILE,
-    transforms=transforms
-)
-val_dataset = CocoDetectionTV(
-    f'{DATA_ROOT}/val2017',
-    annFile=VAL_ANNFILE,
-    transforms=transforms
-)
+train_dataset = VOCDetectionTV(DATA_ROOT, image_set='train', download=True,
+                               transforms=transforms)
+val_dataset = VOCDetectionTV(DATA_ROOT, image_set='val',
+                             transforms=transforms)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
-na_cnt = 0
-for i in range(max(class_to_idx.values())):
-    if i not in class_to_idx.values():
-        na_cnt += 1
-        idx_to_class[i] = f'NA{"{:02}".format(na_cnt)}'
 
 # Dataloader
 def collate_fn(batch):
@@ -213,9 +200,9 @@ def calc_epoch_metrics(preds, targets):
                              idx_to_class, 
                              iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
+    print(f'mAP={mean_average_precision}')
     global last_aps
     last_aps = aps
-    print(f'mAP={mean_average_precision}')
     return {'mAP': mean_average_precision}
 
 def train_one_epoch(loader, device, model,
