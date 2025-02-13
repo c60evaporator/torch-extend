@@ -205,7 +205,7 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Calculate the loss
     loss = None
     # Store the predictions and targets for calculating metrics
-    val_batch_preds.extend(get_preds_cpu(batch[0].to(device), model))
+    val_batch_preds.extend(get_preds_cpu([img.to(device) for img in batch[0]], model))
     val_batch_targets.extend(get_targets_cpu(batch[1]))
     return loss
 

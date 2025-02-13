@@ -8,15 +8,15 @@ sys.path.append(ROOT)
 import torch
 
 # Parameters
-EPOCHS = 10
-BATCH_SIZE = 8
-NUM_WORKERS = 4
+EPOCHS = 4
+BATCH_SIZE = 2
+NUM_WORKERS = 2
 DATA_ROOT = './datasets/VOC2012'
 # Optimizer Parameters
 OPT_NAME = 'sgd'
-LR = 0.05
-WEIGHT_DECAY = 0
-MOMENTUM = 0  # For SGD and RMSprop
+LR = 0.005
+WEIGHT_DECAY = 0.0005
+MOMENTUM = 0.9  # For SGD and RMSprop
 RMSPROP_ALPHA = 0.99  # For RMSprop
 EPS = 1e-8  # For RMSprop, Adam, and AdamW
 ADAM_BETAS = (0.9, 0.999)  # For Adam and AdamW
@@ -50,17 +50,20 @@ from albumentations.pytorch import ToTensorV2
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 # Transforms for training (https://github.com/chenyuntc/simple-faster-rcnn-pytorch/blob/master/data/dataset.py)
-def conditional_transform(image, bboxes, class_labels):
+def edge_resize_image(image, **kwargs):
     """Short edge and long edge threshold resize (https://github.com/chenyuntc/simple-faster-rcnn-pytorch/blob/master/data/dataset.py#L42)"""
     SHORT_EDGE_THRESH = 600
     LONG_EDGE_THRESH = 1000
-    scale1 = SHORT_EDGE_THRESH / min(image.shape[:2])
-    scale2 = LONG_EDGE_THRESH / max(image.shape[:2])
+    scale1 = SHORT_EDGE_THRESH / min(kwargs['shape'][:2])
+    scale2 = LONG_EDGE_THRESH / max(kwargs['shape'][:2])
     scale = min(scale1, scale2)
-    return A.Resize(height=int(image.shape[0] * scale), width=int(image.shape[1] * scale))(image=image, bboxes=bboxes, class_labels=class_labels)
+    return A.Resize(height=int(kwargs['shape'][0] * scale), width=int(kwargs['shape'][1] * scale))(image=image)['image']
+
+def edge_resize_bboxes(src, **kwargs):
+    return src  # Do nothing because bbox is relative to the image size
 
 train_transform = A.Compose([
-    A.Lambda(image=conditional_transform, bboxes=conditional_transform, class_labels=conditional_transform),
+    A.Lambda(image=edge_resize_image, bboxes=edge_resize_bboxes),
     A.HorizontalFlip(p=0.5),
     A.Normalize(IMAGENET_MEAN, IMAGENET_STD),  # Normalization (mean and std of the imagenet dataset for normalizing)
     ToTensorV2()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
@@ -71,6 +74,12 @@ eval_transform = A.Compose([
     A.Normalize(IMAGENET_MEAN, IMAGENET_STD),
     ToTensorV2()
 ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+
+
+from torchvision.transforms import v2
+transforms = v2.Compose([
+    v2.ToTensor()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
+])
 
 # %% Define the Dataset
 # Define the dataset
@@ -207,7 +216,7 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Calculate the loss
     loss = None
     # Store the predictions and targets for calculating metrics
-    val_batch_preds.extend(get_preds_cpu(batch[0].to(device), model))
+    val_batch_preds.extend(get_preds_cpu([img.to(device) for img in batch[0]], model))
     val_batch_targets.extend(get_targets_cpu(batch[1]))
     return loss
 
@@ -315,6 +324,16 @@ for i, metric_name in enumerate(val_metrics_all[0].keys()):
     axes[i+1].set_title(f'Validation {metric_name}')
 fig.tight_layout()
 plt.show()
+
+#%% Plot predicted bounding boxes in the first minibatch of the validation dataset
+from torch_extend.display.detection import show_predicted_bboxes
+
+model.eval()  # Set the evaluation mode
+val_iter = iter(val_dataloader)
+imgs, targets = next(val_iter)
+imgs_gpu = [img.to(device) for img in imgs]
+preds = model(imgs_gpu)
+show_predicted_bboxes(imgs, preds, targets, idx_to_class_bg)
 
 #%% Plot Average Precisions
 # Plot Average Precisions

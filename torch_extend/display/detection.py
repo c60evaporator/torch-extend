@@ -65,13 +65,13 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
             plt.text(boxes[idx][0], boxes[idx][1], labels[idx], color='red', fontsize=8)
             ax.plot(boxes[idx][2], boxes[idx][3], marker='X', markersize=6, color = 'red') #　Anomaly bottomright
 
-def show_pred_true_boxes(image, 
-                         boxes_pred, labels_pred,
-                         boxes_true, labels_true,
-                         idx_to_class = None,
-                         color_true = 'green', color_pred = 'red', ax=None,
-                         scores=None, conf_threshold=0.0, score_decimal=3,
-                         calc_iou=False, iou_decimal=3):
+def _show_pred_true_boxes(image, 
+                          boxes_pred, labels_pred,
+                          boxes_true, labels_true,
+                          idx_to_class = None,
+                          color_true = 'green', color_pred = 'red', ax=None,
+                          scores=None, conf_threshold=0.0, score_decimal=3,
+                          calc_iou=False, iou_decimal=3):
     """
     Show the true bounding boxes and the predicted bounding boxes
 
@@ -167,17 +167,17 @@ def show_pred_true_boxes(image,
     # Return result
     return boxes_confident, labels_confident, scores_confident, ious_confident
 
-def show_predicted_detection_minibatch(imgs, predictions, targets, idx_to_class,
-                                       max_displayed_images=None, conf_threshold=0.5):
+def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
+                          max_displayed_images=None, conf_threshold=0.5):
     """
-    Show predicted minibatch images with bounding boxes.
+    Show minibatch images with predicted bounding boxes.
 
     Parameters
     ----------
     imgs : List[torch.Tensor (C x H x W)]
         List of the images which are standardized to [0, 1]
     
-    predictions : Dict[str, Any] (TorchVision detection prediction format)
+    preds : Dict[str, Any] (TorchVision detection prediction format)
         List of the prediction result. The format should be as follows.
 
         [{'boxes': Tensor([[xmin1, ymin1, xmax1, ymax1],..]), 'labels': Tensor([labelindex1,..]), 'scores': Tensor([confidence1,..])}]
@@ -197,12 +197,12 @@ def show_predicted_detection_minibatch(imgs, predictions, targets, idx_to_class,
     conf_threshold : float
         A threshold of the confidence score for selecting predicted bounding boxes shown.
     """
-    for i, (img, prediction, target) in enumerate(zip(imgs, predictions, targets)):
-        img = (img*255).to(torch.uint8)  # Change from float[0, 1] to uint[0, 255]
-        boxes = prediction['boxes'].cpu().detach()
-        labels = prediction['labels'].cpu().detach().numpy()
+    for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
+        img = (img*255).to(torch.uint8).cpu().detach()  # Change from float[0, 1] to uint[0, 255]
+        boxes = pred['boxes'].cpu().detach()
+        labels = pred['labels'].cpu().detach().numpy()
         labels = np.where(labels>=len(idx_to_class),-1, labels)  # Modify labels to 0 if the predicted labels are background
-        scores = prediction['scores'].cpu().detach().numpy()
+        scores = pred['scores'].cpu().detach().numpy()
         print(f'idx={i}')
         print(f'labels={labels}')
         print(f'scores={scores}')
@@ -215,10 +215,10 @@ def show_predicted_detection_minibatch(imgs, predictions, targets, idx_to_class,
         boxes_true = target['boxes']
         labels_true = target['labels']
         boxes_confident, labels_confident, scores_confident, ious_confident = \
-            show_pred_true_boxes(img, boxes, labels, boxes_true, labels_true,
-                                idx_to_class=idx_to_class,
-                                scores=scores, conf_threshold=conf_threshold,
-                                calc_iou=True)
+            _show_pred_true_boxes(img, boxes, labels, boxes_true, labels_true,
+                                  idx_to_class=idx_to_class,
+                                  scores=scores, conf_threshold=conf_threshold,
+                                  calc_iou=True)
         plt.title('Confident bounding boxes')
         plt.show()
         if max_displayed_images is not None and i >= max_displayed_images - 1:
