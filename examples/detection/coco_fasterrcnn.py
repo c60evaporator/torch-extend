@@ -88,6 +88,9 @@ for i in range(max(class_to_idx.values())):
     if i not in class_to_idx.values():
         na_cnt += 1
         idx_to_class[i] = f'NA{"{:02}".format(na_cnt)}'
+# Index to class dict with background
+idx_to_class_bg = {k: v for k, v in idx_to_class.items()}
+idx_to_class_bg[-1] = 'background'
 
 # Dataloader
 def collate_fn(batch):
@@ -210,7 +213,7 @@ def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Calculate the mean Average Precision
     aps = average_precisions(preds, targets,
-                             idx_to_class, 
+                             idx_to_class_bg, 
                              iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
     global last_aps
@@ -275,6 +278,7 @@ for i_epoch in range(EPOCHS):
     val_step_losses, val_metrics_epoch = val_one_epoch(val_dataloader, device, model,
                                                 criterion)
     # Calculate the average loss
+    val_loss_epoch = None
     if len(val_step_losses) > 0:
         val_loss_epoch = sum(val_step_losses) / len(val_step_losses)
         val_epoch_losses.append(val_loss_epoch)
@@ -330,7 +334,7 @@ from torch_extend.display.detection import show_average_precisions
 #             batch_targets.extend(get_targets_cpu(targets))
 #     # Calculate average precisions
 #     aps = average_precisions(batch_preds, batch_targets,
-#                              idx_to_class, 
+#                              idx_to_class_bg, 
 #                              iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
 #     show_average_precisions(aps)
 

@@ -43,18 +43,33 @@ else:
 # Set the random seed
 torch.manual_seed(42)
 
-# %% Define the transforms
 ###### 2. Define the transforms ######
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
-# Transforms for training
-transforms = A.Compose([
-    A.Resize(640, 640),  # Resize the image to (640, 640)
+# Transforms for training (https://github.com/chenyuntc/simple-faster-rcnn-pytorch/blob/master/data/dataset.py)
+def conditional_transform(image, bboxes, class_labels):
+    """Short edge and long edge threshold resize (https://github.com/chenyuntc/simple-faster-rcnn-pytorch/blob/master/data/dataset.py#L42)"""
+    SHORT_EDGE_THRESH = 600
+    LONG_EDGE_THRESH = 1000
+    scale1 = SHORT_EDGE_THRESH / min(image.shape[:2])
+    scale2 = LONG_EDGE_THRESH / max(image.shape[:2])
+    scale = min(scale1, scale2)
+    return A.Resize(height=int(image.shape[0] * scale), width=int(image.shape[1] * scale))(image=image, bboxes=bboxes, class_labels=class_labels)
+
+train_transform = A.Compose([
+    A.Lambda(image=conditional_transform, bboxes=conditional_transform, class_labels=conditional_transform),
+    A.HorizontalFlip(p=0.5),
     A.Normalize(IMAGENET_MEAN, IMAGENET_STD),  # Normalization (mean and std of the imagenet dataset for normalizing)
     ToTensorV2()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
+], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+
+# Transforms for training
+eval_transform = A.Compose([
+    A.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+    ToTensorV2()
 ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
 # %% Define the Dataset
@@ -75,6 +90,9 @@ val_dataset = VOCDetectionTV(DATA_ROOT, image_set='val',
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
+# Index to class dict with background
+idx_to_class_bg = {k: v for k, v in idx_to_class.items()}
+idx_to_class_bg[-1] = 'background'
 
 # Dataloader
 def collate_fn(batch):
@@ -197,7 +215,7 @@ def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Calculate the mean Average Precision
     aps = average_precisions(preds, targets,
-                             idx_to_class, 
+                             idx_to_class_bg, 
                              iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
     print(f'mAP={mean_average_precision}')
@@ -262,6 +280,7 @@ for i_epoch in range(EPOCHS):
     val_step_losses, val_metrics_epoch = val_one_epoch(val_dataloader, device, model,
                                                 criterion)
     # Calculate the average loss
+    val_loss_epoch = None
     if len(val_step_losses) > 0:
         val_loss_epoch = sum(val_step_losses) / len(val_step_losses)
         val_epoch_losses.append(val_loss_epoch)
@@ -317,7 +336,7 @@ from torch_extend.display.detection import show_average_precisions
 #             batch_targets.extend(get_targets_cpu(targets))
 #     # Calculate average precisions
 #     aps = average_precisions(batch_preds, batch_targets,
-#                              idx_to_class, 
+#                              idx_to_class_bg, 
 #                              iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
 #     show_average_precisions(aps)
 
