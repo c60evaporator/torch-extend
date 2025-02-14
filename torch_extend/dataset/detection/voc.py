@@ -16,12 +16,24 @@ try:
 except ImportError:
     from xml.etree.ElementTree import parse as ET_parse
 
-from ...data_converter.detection import DetectionOutput
+from .utils import DetectionOutput
 
-class VOCBaseTV(VisionDataset, DetectionOutput):
-    _SPLITS_DIR: str
-    _TARGET_DIR: str
-    _TARGET_FILE_EXT: str
+class VOCBaseTV(VisionDataset):
+    def _get_images_targets(self, root, image_set, splits_dir_name, target_dir_name, target_file_ext):
+        # Get the path list of images and targets
+        splits_dir = os.path.join(root, "ImageSets", splits_dir_name)
+        split_f = os.path.join(splits_dir, image_set.rstrip("\n") + ".txt")
+        with open(os.path.join(split_f)) as f:
+            file_names = [x.strip() for x in f.readlines()]
+        # Get the images
+        image_dir = os.path.join(root, "JPEGImages")
+        images = [os.path.join(image_dir, x + ".jpg") for x in file_names]
+        # Get the targets
+        target_dir = os.path.join(root, target_dir_name)
+        targets = [os.path.join(target_dir, x + target_file_ext) for x in file_names]
+
+        assert len(images) == len(targets)
+        return images, targets
 
     def __init__(
         self,
@@ -57,21 +69,16 @@ class VOCBaseTV(VisionDataset, DetectionOutput):
         if not os.path.isdir(root):
             raise RuntimeError("Dataset not found or corrupted")
         
-        splits_dir = os.path.join(root, "ImageSets", self._SPLITS_DIR)
-        split_f = os.path.join(splits_dir, image_set.rstrip("\n") + ".txt")
-        with open(os.path.join(split_f)) as f:
-            file_names = [x.strip() for x in f.readlines()]
-        
-        image_dir = os.path.join(root, "JPEGImages")
-        self.images = [os.path.join(image_dir, x + ".jpg") for x in file_names]
+        # Get the images and targets for Object Detection
+        self.images_detection, self.bboxes = self._get_images_targets(root, image_set, "Main", "Annotations", ".xml")
 
-        target_dir = os.path.join(root, self._TARGET_DIR)
-        self.targets = [os.path.join(target_dir, x + self._TARGET_FILE_EXT) for x in file_names]
+        # Get the images and targets for Semantic Segmentation
+        if "SegmentationClass" in os.listdir(root):
+            self.images_semantic, self.masks = self._get_images_targets(root, image_set, "Segmentation", "SegmentationClass", ".png")
 
-        assert len(self.images) == len(self.targets)
-
-    def __len__(self) -> int:
-        return len(self.images)
+        # Get the images and targets for Instance Segmentation
+        if "SegmentationObject" in os.listdir(root):
+            self.images_instance, self.instances = self._get_images_targets(root, image_set, "Segmentation", "SegmentationObject", ".png")
 
 class VOCDetectionTV(VOCBaseTV, DetectionOutput):
     """
@@ -94,9 +101,6 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
     transforms : callable, optional
         A function/transform that takes input sample and its target as entry and returns a transformed version.
     """
-    _SPLITS_DIR = "Main"
-    _TARGET_DIR = "Annotations"
-    _TARGET_FILE_EXT = ".xml"
 
     IDX_TO_CLASS = {
         0: 'background',
@@ -122,10 +126,6 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
         20: 'tvmonitor'
     }
 
-    @property
-    def annotations(self) -> List[str]:
-        return self.targets
-
     def __init__(
         self, 
         root: str,
@@ -143,14 +143,16 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
             self.idx_to_class = idx_to_class
         self.class_to_idx = {v: k for k, v in idx_to_class.items()}
         self.ids = os.listdir(root)
+
+    def __len__(self) -> int:
+        return len(self.images_detection)
     
     def _load_image(self, index: int) -> Image.Image:
-        return Image.open(self.images[index]).convert("RGB")
+        return Image.open(self.images_detection[index]).convert("RGB")
     
     def _load_target(self, index: int) -> List[Any]:
-        ann_path = self.targets[index]
         # Read XML file 
-        target = self.parse_voc_xml(ET_parse(self.annotations[index]).getroot())
+        target = self.parse_voc_xml(ET_parse(self.bboxes[index]).getroot())
         objects = target['annotation']['object']
         # Get the labels
         labels = [self.class_to_idx[obj['name']] for obj in objects]
@@ -166,7 +168,7 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
         # Convert the bounding boxes
         boxes = torch.tensor(boxes, dtype=torch.int64) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.int64)
         # Get the image path
-        target = {'boxes': boxes, 'labels': labels, 'image_path': self.images[index]}
+        target = {'boxes': boxes, 'labels': labels, 'image_path': self.images_detection[index]}
         return target
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:

@@ -1,11 +1,12 @@
-from typing import Any, Callable, List, Dict, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 import torch
 from torchvision.datasets import CocoDetection
 import albumentations as A
 import numpy as np
 import os
 
-from ...data_converter.detection import DetectionOutput, convert_bbox_xywh_to_xyxy
+from ...data_converter.detection import convert_bbox_xywh_to_xyxy
+from .utils import DetectionOutput
 
 class CocoDetectionTV(CocoDetection, DetectionOutput):
     """

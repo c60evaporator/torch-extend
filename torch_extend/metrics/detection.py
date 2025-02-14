@@ -126,7 +126,7 @@ def _average_precision(precision: np.ndarray, recall: np.ndarray,
 def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores'], Tensor]],
                        targets: List[Dict[Literal['boxes', 'labels', 'scores'], Tensor]],
                        idx_to_class: Dict[int, str],
-                       iou_threshold: float=0.5, conf_threshold: float=0.2,
+                       iou_threshold: float=0.5, conf_threshold: float=0.0,
                        smoothe: bool=True, precision_center: bool=False):
     """
     Calculate the average precision of each class label
@@ -155,7 +155,7 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
     conf_threshold : float
         Bounding boxes whose confidence score exceed this threshold are used as the predicted bounding boxes.
 
-        If None, all the predicted bounding boxes are used.
+        Please set to 0.0 if you follow the general definition of general AP in Object Detection.
 
     precision_center : bool
         This parameter is used for specifying which value is used as the y value during the calculation of area under curve (AUC).
@@ -227,7 +227,7 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
 
 def average_precisions_torchvison(dataloader: DataLoader, model: nn.Module, device: Literal['cuda', 'cpu'],
                                   idx_to_class: Dict[int, str],
-                                  iou_threshold: float=0.5, conf_threshold: float=0.2,
+                                  iou_threshold: float=0.5, conf_threshold: float=0.0,
                                   smoothe: bool=True, precision_center: bool=False):
     """
     Calculate average precisions with TorchVision models and DataLoader
@@ -252,7 +252,7 @@ def average_precisions_torchvison(dataloader: DataLoader, model: nn.Module, devi
     conf_threshold : float
         Bounding boxes whose confidence score exceed this threshold are used as the predicted bounding boxes.
 
-        If None, all the predicted bounding boxes are used.
+        Please set to 0.0 if you follow the general definition of general AP in Object Detection.
 
     precision_center : bool
         This parameter is used for specifying which value is used as the y value during the calculation of area under curve (AUC).
@@ -281,5 +281,5 @@ def average_precisions_torchvison(dataloader: DataLoader, model: nn.Module, devi
         predictions_list.extend(predictions_cpu)
         if i%100 == 0:  # Show progress every 100 images
             print(f'Prediction for mAP: {i}/{len(dataloader)} batches, elapsed_time: {time.time() - start}')
-    aps = average_precisions(predictions_list, targets_list, idx_to_class, iou_threshold, conf_threshold)
+    aps = average_precisions(predictions_list, targets_list, idx_to_class, iou_threshold, conf_threshold, smoothe, precision_center)
     return aps

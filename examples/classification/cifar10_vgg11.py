@@ -9,12 +9,12 @@ import torch
 
 # General Parameters
 EPOCHS = 30
-BATCH_SIZE = 128
+BATCH_SIZE = 128  # Bigger batch size is faster but less accurate (https://wandb.ai/ayush-thakur/dl-question-bank/reports/What-s-the-Optimal-Batch-Size-to-Train-a-Neural-Network---VmlldzoyMDkyNDU)
 NUM_WORKERS = 4
 DATA_ROOT = './datasets/CIFAR10'
 # Optimizer Parameters
 OPT_NAME = 'sgd'
-LR = 0.05
+LR = 0.01
 WEIGHT_DECAY = 0
 MOMENTUM = 0  # For SGD and RMSprop
 RMSPROP_ALPHA = 0.99  # For RMSprop
@@ -56,14 +56,14 @@ train_transform = A.Compose([
     A.Rotate(limit=5, interpolation=cv2.INTER_NEAREST),
     A.Affine(rotate=0, shear=10, scale=(0.9,1.1)),
     A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-    A.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ToTensorV2()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
+    A.Normalize(IMAGENET_MEAN, IMAGENET_STD),  # ImageNet Normalization
+    ToTensorV2()  # Convert from numpy.ndarray to torch.Tensor
 ])
 # Transforms for validation and test (https://www.kaggle.com/code/zlanan/cifar10-high-accuracy-model-build-on-pytorch)
 eval_transform = A.Compose([
     A.Resize(32,32),
     A.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ToTensorV2()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
+    ToTensorV2()
 ])
 
 # %% Define the Dataset
@@ -319,3 +319,22 @@ for i, metric_name in enumerate(val_metrics_all[0].keys()):
     axes[i+1].set_title(f'Validation {metric_name}')
 fig.tight_layout()
 plt.show()
+
+#%% Plot predicted labels in the first minibatch of the validation dataset
+model.eval()  # Set the evaluation mode
+val_iter = iter(val_dataloader)
+imgs, targets = next(val_iter)
+preds = model(imgs.to(device))
+for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
+    predicted_label = torch.argmax(pred).item()
+    # Denormalize the image
+    denormalize_image = v2.Compose([
+        v2.Normalize(mean=[-mean/std for mean, std in zip(IMAGENET_MEAN, IMAGENET_STD)],
+                     std=[1/std for std in IMAGENET_STD])
+    ])
+    img_permute = img.permute(1, 2, 0)
+    plt.imshow(img_permute)
+    plt.title(f'pred: {idx_to_class[predicted_label]}, true: {idx_to_class[target.item()]}')
+    plt.show()
+
+# %%

@@ -7,10 +7,10 @@ sys.path.append(ROOT)
 
 import torch
 
-# Parameters
+# General Parameters
 EPOCHS = 4
-BATCH_SIZE = 2
-NUM_WORKERS = 2
+BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
+NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
 DATA_ROOT = './datasets/VOC2012'
 # Optimizer Parameters
 OPT_NAME = 'sgd'
@@ -30,7 +30,7 @@ LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
 # Metrics Parameters
 AP_IOU_THRESHOLD = 0.5
-AP_CONF_THRESHOLD = 0.01
+AP_CONF_THRESHOLD = 0.0
 
 # Select the device
 DEVICE = 'cuda'
@@ -46,39 +46,27 @@ torch.manual_seed(42)
 ###### 2. Define the transforms ######
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD = [0.229, 0.224, 0.225]
-# Transforms for training (https://github.com/chenyuntc/simple-faster-rcnn-pytorch/blob/master/data/dataset.py)
-def edge_resize_image(image, **kwargs):
-    """Short edge and long edge threshold resize (https://github.com/chenyuntc/simple-faster-rcnn-pytorch/blob/master/data/dataset.py#L42)"""
-    SHORT_EDGE_THRESH = 600
-    LONG_EDGE_THRESH = 1000
-    scale1 = SHORT_EDGE_THRESH / min(kwargs['shape'][:2])
-    scale2 = LONG_EDGE_THRESH / max(kwargs['shape'][:2])
-    scale = min(scale1, scale2)
-    return A.Resize(height=int(kwargs['shape'][0] * scale), width=int(kwargs['shape'][1] * scale))(image=image)['image']
-
-def edge_resize_bboxes(src, **kwargs):
-    return src  # Do nothing because bbox is relative to the image size
-
-train_transform = A.Compose([
-    A.Lambda(image=edge_resize_image, bboxes=edge_resize_bboxes),
-    A.HorizontalFlip(p=0.5),
-    A.Normalize(IMAGENET_MEAN, IMAGENET_STD),  # Normalization (mean and std of the imagenet dataset for normalizing)
-    ToTensorV2()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
-], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+# Note: ImageNet Normalization is not needed for TorchVision Faster R-CNN
+# IMAGENET_MEAN = [0.485, 0.456, 0.406]
+# IMAGENET_STD = [0.229, 0.224, 0.225]
+NORM_MEAN = [0.0, 0.0, 0.0]
+NORM_STD = [1.0, 1.0, 1.0]
 
 # Transforms for training
+train_transform = A.Compose([
+    A.Normalize(NORM_MEAN, NORM_STD),  # Normalization from uint8 [0, 255] to float32 [0.0, 1.0]
+    ToTensorV2(),  # Convert from numpy.ndarray to torch.Tensor
+], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+# Transforms for validation and test
 eval_transform = A.Compose([
-    A.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ToTensorV2()
+    A.Normalize(NORM_MEAN, NORM_STD),  # Normalization from uint8 [0, 255] to float32 [0.0, 1.0]
+    ToTensorV2()  # Convert from numpy.ndarray to torch.Tensor
 ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
-
 from torchvision.transforms import v2
-transforms = v2.Compose([
-    v2.ToTensor()  # Convert from range [0, 255] to a torch.FloatTensor in the range [0.0, 1.0]
+transform = v2.Compose([
+    v2.ToImage(),  # Convert from PIL.Image to a torch.Tensor
+    v2.ToDtype(torch.float32, scale=True)  # Convert from uint8 [0, 255] to float32 [0.0, 1.0]
 ])
 
 # %% Define the Dataset
@@ -92,9 +80,9 @@ from torch_extend.display.detection import show_bounding_boxes
 
 # Dataset
 train_dataset = VOCDetectionTV(DATA_ROOT, image_set='train', download=True,
-                               transforms=transforms)
+                               transforms=train_transform)
 val_dataset = VOCDetectionTV(DATA_ROOT, image_set='val',
-                             transforms=transforms)
+                             transforms=eval_transform)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
@@ -110,20 +98,20 @@ train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE,
                               shuffle=True, num_workers=NUM_WORKERS,
                               collate_fn=collate_fn)
 val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
-                            shuffle=True, num_workers=NUM_WORKERS,
+                            shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=collate_fn)
 
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
     # Denormalize the image
-    denormalize_image = v2.Compose([
-        v2.Normalize(mean=[-mean/std for mean, std in zip(IMAGENET_MEAN, IMAGENET_STD)],
-                    std=[1/std for std in IMAGENET_STD])
-    ])
-    img = denormalize_image(img)
+    # denormalize_image = v2.Compose([
+    #     v2.Normalize(mean=[-mean/std for mean, std in zip(IMAGENET_MEAN, IMAGENET_STD)],
+    #                 std=[1/std for std in IMAGENET_STD])
+    # ])
+    # img = denormalize_image(img)
     # Show the image
-    img = (img*255).to(torch.uint8)  # Change from float[0, 1] to uint[0, 255]
+    img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
     boxes, labels = target['boxes'], target['labels']
     show_bounding_boxes(img, boxes, labels=labels,
                         idx_to_class=idx_to_class, ax=ax)
@@ -267,6 +255,9 @@ def val_one_epoch(loader, device, model,
                                    val_batch_preds, val_batch_targets)
             if loss is not None:
                 val_step_losses.append(loss.detach().item())  # Record the loss
+            # Plot the predicted bounding boxes
+            # if batch_idx == 0:
+            #     show_predicted_bboxes(batch[0], val_batch_preds, val_batch_targets, idx_to_class_bg)
     torch.set_grad_enabled(True)
     model.train()
     # Calculate the metrics
@@ -339,24 +330,6 @@ show_predicted_bboxes(imgs, preds, targets, idx_to_class_bg)
 # Plot Average Precisions
 from torch_extend.display.detection import show_average_precisions
 
-# def plot_average_precisions(loader):
-#     """Plot the average precisions"""
-#     torch.set_grad_enabled(False)
-#     model.eval()
-#     batch_preds = []
-#     batch_targets = []
-#     with tqdm(loader, unit="batches") as tepoch:
-#         for batch_idx, batch in enumerate(tepoch):
-#             # Store the predictions and targets for calculating metrics
-#             inputs = [img.to(device) for img in batch[0]]
-#             targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
-#                         for t in batch[1]]
-#             batch_preds.extend(get_preds_cpu(inputs, model))
-#             batch_targets.extend(get_targets_cpu(targets))
-#     # Calculate average precisions
-#     aps = average_precisions(batch_preds, batch_targets,
-#                              idx_to_class_bg, 
-#                              iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
-#     show_average_precisions(aps)
-
 show_average_precisions(last_aps)
+
+#%%
