@@ -1,11 +1,12 @@
-#%% Select the device
+#%% Select the device and hyperparameters
+###### 1. Select the device and hyperparameters ######
 import os
 import sys
+import torch
+
 # Add the root directory of the repository to system pathes (For debugging)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
-
-import torch
 
 # General Parameters
 EPOCHS = 30
@@ -66,8 +67,8 @@ eval_transform = A.Compose([
     ToTensorV2()
 ])
 
-# %% Define the Dataset
-# Define the dataset
+# %% Define the dataset
+###### 3. Define the dataset ######
 from torch_extend.dataset.classification.cifar import CIFAR10TV
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
@@ -123,7 +124,7 @@ for i, (img, target) in enumerate(zip(imgs, targets)):
     plt.show()
 
 # %% Define the model
-# Define the model
+###### 4. Define the model ######
 from torchvision import models
 from torch import nn
 

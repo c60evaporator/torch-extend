@@ -165,7 +165,7 @@ def show_segmentations(image, target,
     axes[1].set_title('Raw image')
     plt.show()
 
-def show_predicted_segmentation_minibatch(imgs, predictions, targets, idx_to_class,
+def show_predicted_segmentation_minibatch(imgs, preds, targets, idx_to_class,
                                           alpha=0.5, palette=None,
                                           bg_idx=0, border_idx=None,
                                           plot_raw_image=True,
@@ -179,10 +179,8 @@ def show_predicted_segmentation_minibatch(imgs, predictions, targets, idx_to_cla
     imgs : torch.Tensor (image_idx x C x H x W)
         Images which are standardized to [0, 1]
     
-    predictions : Dict[Literal['out', 'aux'], Tensor(image_idx x class x H x W)] (TorchVision segmentation prediction format)
-        List of the prediction result. The format should be as follows. 'out' indicates the probability of each classes and 'aux' is not useful (https://pytorch.org/hub/pytorch_vision_deeplabv3_resnet101/)
-
-        {'out': Tensor(image_idx x class x H x W), 'aux': Tensor(image_idx x class x H x W)}
+    preds : List[Tensor(class x H x W)] or Tensor(image_idx x class x H x W)
+        List of the prediction result.
     
     targets : torch.Tensor (image_idx x H x W) (TorchVision segmentation target format)
         Ground truths which indicates the label index of each pixel
@@ -216,9 +214,9 @@ def show_predicted_segmentation_minibatch(imgs, predictions, targets, idx_to_cla
     if palette is None:
         palette = _create_segmentation_palette()
     # Image loop
-    for i, (img, prediction, target) in enumerate(zip(imgs, predictions['out'], targets)):
+    for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
         img = (img*255).to(torch.uint8)  # Change from float[0, 1] to uint[0, 255]
-        predicted_labels = prediction.argmax(0).cpu().detach()
+        predicted_labels = pred.argmax(0).cpu().detach()
         print(f'idx={i}')
         # Create a camvas
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))

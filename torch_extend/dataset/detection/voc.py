@@ -19,6 +19,30 @@ except ImportError:
 from .utils import DetectionOutput
 
 class VOCBaseTV(VisionDataset):
+    IDX_TO_CLASS = {
+        0: 'background',
+        1: 'aeroplane',
+        2: 'bicycle',
+        3: 'bird',
+        4: 'boat',
+        5: 'bottle',
+        6: 'bus',
+        7: 'car',
+        8: 'cat',
+        9: 'chair',
+        10: 'cow',
+        11: 'diningtable',
+        12: 'dog',
+        13: 'horse',
+        14: 'motorbike',
+        15: 'person',
+        16: 'pottedplant',
+        17: 'sheep',
+        18: 'sofa',
+        19: 'train',
+        20: 'tvmonitor'
+    }
+    
     def _get_images_targets(self, root, image_set, splits_dir_name, target_dir_name, target_file_ext):
         # Get the path list of images and targets
         splits_dir = os.path.join(root, "ImageSets", splits_dir_name)
@@ -102,30 +126,6 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
         A function/transform that takes input sample and its target as entry and returns a transformed version.
     """
 
-    IDX_TO_CLASS = {
-        0: 'background',
-        1: 'aeroplane',
-        2: 'bicycle',
-        3: 'bird',
-        4: 'boat',
-        5: 'bottle',
-        6: 'bus',
-        7: 'car',
-        8: 'cat',
-        9: 'chair',
-        10: 'cow',
-        11: 'diningtable',
-        12: 'dog',
-        13: 'horse',
-        14: 'motorbike',
-        15: 'person',
-        16: 'pottedplant',
-        17: 'sheep',
-        18: 'sofa',
-        19: 'train',
-        20: 'tvmonitor'
-    }
-
     def __init__(
         self, 
         root: str,
@@ -138,10 +138,10 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
     ):
         super().__init__(root, image_set, download, transform, target_transform, transforms)
         if idx_to_class is None:
-            idx_to_class = self.IDX_TO_CLASS
+            self.idx_to_class = self.IDX_TO_CLASS
         else:
             self.idx_to_class = idx_to_class
-        self.class_to_idx = {v: k for k, v in idx_to_class.items()}
+        self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         self.ids = os.listdir(root)
 
     def __len__(self) -> int:

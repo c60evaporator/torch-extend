@@ -1,4 +1,5 @@
 from typing import Any, Callable, List, Optional, Tuple
+import albumentations as A
 from torchvision.datasets import CocoDetection
 import numpy as np
 from PIL import Image
@@ -60,13 +61,14 @@ class CocoSemanticTV(CocoDetection, SemanticOutput):
         target = self._load_target(id, image.size[1], image.size[0])
         target = Image.fromarray(target)
 
-        if self.albumentations_transform is not None:
-            A_transformed = self.albumentations_transform(image=np.array(image), mask=np.asarray(target).copy())
-            image = A_transformed['image']
-            target = A_transformed['mask']
-
         if self.transforms is not None:
-            image, target = self.transforms(image, target)
+            # Albumentation transforms
+            if isinstance(self.transforms, A.Compose):
+                transformed = self.transforms(image=np.array(image), mask=np.asarray(target).copy())
+                image, target = transformed['image'], transformed['mask']
+            # TorchVision transforms
+            else:
+                image, target = self.transforms(image, target)
 
         # Postprocessing of the target
         target = target.squeeze(0).long()  # Convert to int64
