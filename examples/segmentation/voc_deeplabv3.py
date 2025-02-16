@@ -61,6 +61,7 @@ train_transform = A.Compose([
 ])
 # Transforms for validation and test
 eval_transform = A.Compose([
+    A.Resize(520, 520),
     A.Normalize(IMAGENET_MEAN, IMAGENET_STD),  # ImageNet Normalization
     ToTensorV2()  # Convert from numpy.ndarray to torch.Tensor
 ])

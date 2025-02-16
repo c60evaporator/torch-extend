@@ -1,7 +1,7 @@
 from pycocotools import mask as coco_mask
 import numpy as np
 
-def _convert_polygon_to_mask(segmentations, height, width):
+def convert_polygon_to_mask(segmentations, height, width):
     """
     Convert the polygons to masks
     reference https://github.com/facebookresearch/detr/blob/main/datasets/coco.py
@@ -21,7 +21,7 @@ def _convert_polygon_to_mask(segmentations, height, width):
         masks = np.zeros((0, height, width), dtype=np.uint8)
     return masks
 
-def _merge_masks(labels: np.ndarray, masks: np.ndarray):
+def merge_masks(labels: np.ndarray, masks: np.ndarray):
     """
     Merge multiple masks into a mask
     """
