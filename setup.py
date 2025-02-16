@@ -10,7 +10,7 @@ NAME = 'torch-extend'
 AUTHOR = 'Kenta Nakamura'
 AUTHOR_EMAIL = 'c60evaporator@gmail.com'
 URL = 'https://github.com/c60evaporator/torch-extend'
-LICENSE = 'BSD 3-Clause'
+LICENSE = 'MIT'
 DOWNLOAD_URL = 'https://github.com/c60evaporator/torch-extend'
 VERSION = torch_extend.__version__
 PYTHON_REQUIRES = ">=3.6"
@@ -50,8 +50,9 @@ CLASSIFIERS = [
     'Topic :: Scientific/Engineering',
     'Topic :: Scientific/Engineering :: Visualization',
     'Topic :: Scientific/Engineering :: Artificial Intelligence',
-    'Topic :: Multimedia :: Graphics',
-    'Framework :: PyTorch',
+    'Topic :: Scientific/Engineering :: Image Processing',
+    'Topic :: Scientific/Engineering :: Image Recognition',
+    'Framework :: Jupyter',
 ]
 
 with open('README.rst', 'r') as fp:
