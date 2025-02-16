@@ -190,10 +190,15 @@ def training_step(batch, batch_idx, device, model, criterion):
     loss = calc_train_loss(batch, model, criterion, device)
     return loss
 
-def get_preds_cpu(inputs, model):
+def val_predict(batch, device, model):
+    """Predict the validation batch"""
+    # Predict the batch
+    return model([img.to(device) for img in batch[0]]), batch[1]
+
+def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
     return [{k: v.cpu() for k, v in pred.items()} 
-            for pred in model(inputs)]
+            for pred in preds]
 
 def get_targets_cpu(targets):
     """Get the targets and store them to CPU as a list"""
@@ -203,11 +208,13 @@ def get_targets_cpu(targets):
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
     """Validation step per batch"""
+    # Predict the batch
+    preds, targets = val_predict(batch, device, model)
     # Calculate the loss
     loss = None
     # Store the predictions and targets for calculating metrics
-    val_batch_preds.extend(get_preds_cpu([img.to(device) for img in batch[0]], model))
-    val_batch_targets.extend(get_targets_cpu(batch[1]))
+    val_batch_preds.extend(get_preds_cpu(preds))
+    val_batch_targets.extend(get_targets_cpu(targets))
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -217,10 +224,10 @@ def calc_epoch_metrics(preds, targets):
                              idx_to_class_bg, 
                              iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
-    print(f'mAP={mean_average_precision}')
     global last_aps
     last_aps = aps
-    return {'mAP': mean_average_precision}
+    print(f'mAP@{int(AP_IOU_THRESHOLD*100)}={mean_average_precision}')
+    return {f'mAP@{int(AP_IOU_THRESHOLD*100)}': mean_average_precision}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -274,13 +281,13 @@ start = time.time()
 for i_epoch in range(EPOCHS):
     # Train one epoch
     train_step_losses = train_one_epoch(train_dataloader, device, model,
-                                         criterion, optimizer, lr_scheduler)
+                                        criterion, optimizer, lr_scheduler)
     # Calculate the average loss
     train_loss_epoch = sum(train_step_losses) / len(train_step_losses)
     train_epoch_losses.append(train_loss_epoch)
     # Validate one epoch
     val_step_losses, val_metrics_epoch = val_one_epoch(val_dataloader, device, model,
-                                                criterion)
+                                                       criterion)
     # Calculate the average loss
     val_loss_epoch = None
     if len(val_step_losses) > 0:
@@ -324,8 +331,7 @@ from torch_extend.display.detection import show_predicted_bboxes
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
-imgs_gpu = [img.to(device) for img in imgs]
-preds = model(imgs_gpu)
+preds, targets = val_predict((imgs, targets), device, model)
 show_predicted_bboxes(imgs, preds, targets, idx_to_class_bg)
 
 #%% Plot Average Precisions

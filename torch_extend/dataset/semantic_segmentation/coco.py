@@ -5,9 +5,9 @@ import numpy as np
 from PIL import Image
 
 from ...data_converter.semantic_segmentation import convert_polygon_to_mask, merge_masks
-from .utils import SemanticOutput
+from .utils import SemanticSegOutput
 
-class CocoSemanticTV(CocoDetection, SemanticOutput):
+class CocoSemanticSegmentation(CocoDetection, SemanticSegOutput):
     """
     Dataset from COCO format to Torchvision format with image path
 

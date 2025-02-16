@@ -48,6 +48,8 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import cv2
 
+from torch_extend.validate.common import validate_same_img_size
+
 NORM_MEAN = [0.5, 0.5, 0.5]
 NORM_STD = [0.5, 0.5, 0.5]
 # Transforms for training (https://www.kaggle.com/code/zlanan/cifar10-high-accuracy-model-build-on-pytorch)
@@ -66,6 +68,12 @@ eval_transform = A.Compose([
     A.Normalize(NORM_MEAN, NORM_STD),
     ToTensorV2()
 ])
+
+# Validate the same image size
+same_img_size_train = validate_same_img_size(train_transform)
+same_img_size_eval = validate_same_img_size(eval_transform)
+if not same_img_size_train:
+    raise ValueError("Resize to the same size is necessary in train_transform")
 
 # %% Define the dataset
 ###### 3. Define the dataset ######
@@ -94,12 +102,14 @@ class_to_idx = train_dataset.class_to_idx
 # Index to class dict
 idx_to_class = {v: k for k, v in train_dataset.class_to_idx.items()}
 
-
 # Dataloader
+def collate_fn(batch):
+    return tuple(zip(*batch))
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
                               shuffle=True, num_workers=NUM_WORKERS)
-val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
-                            shuffle=False, num_workers=NUM_WORKERS)
+val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
+                            shuffle=False, num_workers=NUM_WORKERS,
+                            collate_fn=None if same_img_size_eval else collate_fn)
 
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
@@ -192,7 +202,7 @@ elif LR_SCHEDULER == "reducelronplateau":
 ###### 6. Training and Validation loop ######
 import time
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
@@ -205,9 +215,28 @@ def training_step(batch, batch_idx, device, model, criterion):
     loss = calc_train_loss(batch, model, criterion, device)
     return loss
 
-def get_preds_cpu(inputs, model):
+def val_predict(batch, device, model):
+    """Predict the validation batch"""
+    # Predict the batch
+    if isinstance(batch[0], torch.Tensor):
+        preds = model(batch[0].to(device))
+    elif isinstance(batch[0], tuple):
+        preds = torch.stack([model(img.unsqueeze(0).to(device)).squeeze(0)
+                            for img in batch[0]])
+    # Get the targets
+    if isinstance(batch[1], torch.Tensor):
+        targets = batch[1].to(device)
+    elif isinstance(batch[1], tuple):
+        targets = torch.tensor(batch[1], dtype=torch.long).to(device)
+    return preds, targets
+    
+def calc_val_loss(preds, targets, criterion):
+    """Calculate the validation loss from the batch"""
+    return criterion(preds, targets)
+
+def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
-    return [pred.cpu() for pred in model(inputs)]
+    return [pred.cpu() for pred in preds]
 
 def get_targets_cpu(targets):
     """Get the targets and store them to CPU as a list"""
@@ -216,11 +245,13 @@ def get_targets_cpu(targets):
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
     """Validation step per batch"""
+    # Predict the batch
+    preds, targets = val_predict(batch, device, model)
     # Calculate the loss
-    loss = calc_train_loss(batch, model, criterion, device)
+    loss = calc_val_loss(preds, targets, criterion)
     # Store the predictions and targets for calculating metrics
-    val_batch_preds.extend(get_preds_cpu(batch[0].to(device), model))
-    val_batch_targets.extend(get_targets_cpu(batch[1]))
+    val_batch_preds.extend(get_preds_cpu(preds))
+    val_batch_targets.extend(get_targets_cpu(targets))
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -231,6 +262,8 @@ def calc_epoch_metrics(preds, targets):
     precision_macro = precision_score(targets, predicted_labels, average='macro')
     recall_macro = recall_score(targets, predicted_labels, average='macro')
     f1_macro = f1_score(targets, predicted_labels, average='macro')
+    global cm
+    cm = confusion_matrix(targets, predicted_labels)
     return {'accuracy': accuracy,
             'precision_macro': precision_macro,
             'recall_macro': recall_macro,
@@ -333,7 +366,7 @@ plt.show()
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
-preds = model(imgs.to(device))
+preds, targets = val_predict((imgs, targets), device, model)
 for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
     predicted_label = torch.argmax(pred).item()
     # Denormalize the image
@@ -345,5 +378,26 @@ for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
     plt.imshow(img_permute)
     plt.title(f'pred: {idx_to_class[predicted_label]}, true: {idx_to_class[target.item()]}')
     plt.show()
+
+# %% Plot the confusion matrix
+# Plot the confusion matrix
+import seaborn as sns
+import pandas as pd
+
+# Create a DataFrame from the confusion matrix
+df_cm = pd.DataFrame(cm, index=[idx_to_class[i] for i in range(len(idx_to_class))], 
+                     columns=[idx_to_class[i] for i in range(len(idx_to_class))])
+# Plot the confusion matrix
+plt.figure(figsize=(len(idx_to_class), len(idx_to_class)*0.8))
+sns.heatmap(df_cm, annot=True, fmt=".5g", cmap='Blues')
+plt.xlabel('Predicted')
+plt.ylabel('True')
+plt.title('Confusion Matrix')
+plt.show()
+# Calculate and print the accuracy of each class
+print('Accuracy of each class')
+class_accuracies = df_cm.values.diagonal() / df_cm.sum(axis=1).values
+class_accuracies = sorted(class_accuracies)
+print(pd.Series(class_accuracies, index=idx_to_class.values()))
 
 # %%

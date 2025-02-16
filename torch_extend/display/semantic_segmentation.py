@@ -165,12 +165,12 @@ def show_segmentations(image, target,
     axes[1].set_title('Raw image')
     plt.show()
 
-def show_predicted_segmentation_minibatch(imgs, preds, targets, idx_to_class,
-                                          alpha=0.5, palette=None,
-                                          bg_idx=0, border_idx=None,
-                                          plot_raw_image=True,
-                                          max_displayed_images=None,
-                                          calc_iou=True):
+def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
+                                 alpha=0.5, palette=None,
+                                 bg_idx=0, border_idx=None,
+                                 plot_raw_image=True,
+                                 max_displayed_images=None,
+                                 calc_iou=True):
     """
     Show predicted minibatch images with predicted and true segmentation.
 
@@ -209,6 +209,9 @@ def show_predicted_segmentation_minibatch(imgs, preds, targets, idx_to_class,
 
     max_displayed_images : int
         number of maximum displayed images. This is in case of big batch size.
+
+    calc_iou : bool
+        If True, the IoU is calculated and displayed with the label
     """
     # Auto palette generation
     if palette is None:
@@ -238,6 +241,8 @@ def show_predicted_segmentation_minibatch(imgs, preds, targets, idx_to_class,
                 k: ious[i]
                 for i, (k, v) in enumerate(idx_to_class_bd.items())
             }
+        else:
+            iou_scores = None
         # Plot the predicted segmentation
         show_segmentation(img, predicted_labels, alpha, palette, bg_idx, border_idx, 
                           add_legend=True, idx_to_class=idx_to_class, 

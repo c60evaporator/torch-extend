@@ -5,9 +5,9 @@ from PIL import Image
 import os
 
 from ...dataset.detection.voc import VOCBaseTV
-from .utils import SemanticOutput
+from .utils import SemanticSegOutput
 
-class VOCSemanticTV(VOCBaseTV, SemanticOutput):
+class VOCSemanticSegmentation(VOCBaseTV, SemanticSegOutput):
     """`Pascal VOC <http://host.robots.ox.ac.uk/pascal/VOC/>`_ Segmentation Dataset.
 
     Parameters
@@ -18,6 +18,10 @@ class VOCSemanticTV(VOCBaseTV, SemanticOutput):
         A dict which indicates the conversion from the label indices to the label names
     image_set : str
         Select the image_set to use, ``"train"``, ``"trainval"`` or ``"val"``.
+    border_idx : int
+        The index of the border in the target mask.
+    bg_idx : int
+        The index of the background in the target mask.
     transform : callable, optional
         A function/transform that  takes in an PIL image and returns a transformed version. E.g, ``transforms.PILToTensor``
     target_transform : callable, optional
@@ -31,6 +35,7 @@ class VOCSemanticTV(VOCBaseTV, SemanticOutput):
         root: str,
         idx_to_class: Dict[int, str] = None,
         border_idx: int = None,
+        bg_idx: int = 0,
         image_set: str = "train",
         download: bool = False,
         transform: Optional[Callable] = None,
@@ -45,6 +50,7 @@ class VOCSemanticTV(VOCBaseTV, SemanticOutput):
         self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         self.ids = os.listdir(root)
         self.border_idx = border_idx if border_idx is not None else len(self.idx_to_class)
+        self.bg_idx = bg_idx
 
     def __len__(self) -> int:
         return len(self.images_semantic)

@@ -41,10 +41,10 @@ def segmentation_ious_one_image(labels_pred: Tensor, target: Tensor, labels: Lis
     ious = np.divide(tps, unions.astype(np.float32), out=np.full((len(labels),), np.nan), where=(unions!=0))
     return ious, tps, fps, fns
 
-def segmentation_ious_batch(preds: Union[List[Tensor], Tensor],
-                            targets: Union[List[Tensor], Tensor],
-                            idx_to_class: Dict[int, str],
-                            border_idx:int = None):
+def segmentation_ious(preds: Union[List[Tensor], Tensor],
+                      targets: Union[List[Tensor], Tensor],
+                      idx_to_class: Dict[int, str],
+                      border_idx:int = None):
     """
     Calculate the average precision of each class label
 
@@ -142,8 +142,8 @@ def segmentation_ious_torchvison(dataloader: DataLoader, model: nn.Module, devic
             else:
                 raise ValueError('The model output is neither a Tensor nor a dict with "out" key. Please check the model output format.')
         # Calculate TP, FP, FN of the batch
-        tps_batch, fps_batch, fns_batch, ious_batch = segmentation_ious_batch(preds, 
-                                                                              targets, idx_to_class, border_idx)
+        tps_batch, fps_batch, fns_batch, ious_batch = segmentation_ious(preds, 
+                                                                        targets, idx_to_class, border_idx)
         tps_all.append(tps_batch)
         fps_all.append(fps_batch)
         fns_all.append(fns_batch)
