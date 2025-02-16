@@ -77,7 +77,7 @@ if not same_img_size_train:
 
 # %% Define the dataset
 ###### 3. Define the dataset ######
-from torch_extend.dataset.classification.cifar import CIFAR10TV
+from torch_extend.dataset import CIFAR10TV
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt

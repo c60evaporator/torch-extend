@@ -74,7 +74,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset.detection.coco import CocoDetectionTV
+from torch_extend.dataset import CocoDetectionTV
 from torch_extend.display.detection import show_bounding_boxes
 
 # Dataset

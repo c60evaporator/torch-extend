@@ -2,7 +2,7 @@
 # Copyright (c) 2025-2025 Kenta Nakamura
 # License: MIT
 
-from setuptools import setup
+from setuptools import setup, find_packages
 import torch_extend
 
 DESCRIPTION = "torch-extend: TorchVision extension for data loading, metrics calculation, and visialization"
@@ -32,10 +32,6 @@ EXTRAS_REQUIRE = {
         'tqdm>=4.67.1',
     ]
 }
-
-PACKAGES = [
-    'torch_extend'
-]
 
 CLASSIFIERS = [
     'Intended Audience :: Science/Research',
@@ -75,6 +71,6 @@ setup(name=NAME,
       python_requires=PYTHON_REQUIRES,
       install_requires=INSTALL_REQUIRES,
       extras_require=EXTRAS_REQUIRE,
-      packages=PACKAGES,
+      packages=find_packages(),
       classifiers=CLASSIFIERS
     )

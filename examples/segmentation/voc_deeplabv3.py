@@ -78,7 +78,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset.semantic_segmentation.voc import VOCSemanticSegmentation
+from torch_extend.dataset import VOCSemanticSegmentation
 from torch_extend.display.semantic_segmentation import show_segmentations
 
 # Dataset

@@ -77,7 +77,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset.detection.voc import VOCDetectionTV
+from torch_extend.dataset import VOCDetectionTV
 from torch_extend.display.detection import show_bounding_boxes
 
 # Dataset
