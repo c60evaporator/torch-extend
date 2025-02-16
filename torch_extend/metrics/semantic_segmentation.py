@@ -1,6 +1,6 @@
 from typing import Dict, List, Union, Literal
 import torch
-from torch import nn, Tensor, no_grad
+from torch import nn, Tensor
 from torch.utils.data import DataLoader
 from sklearn.metrics import confusion_matrix
 import numpy as np
