@@ -143,11 +143,11 @@ model.classifier = deeplabv3.DeepLabHead(2048, num_classes)
 ###### 5. Criterion, Optimizer and lr_schedulers ######
 import torch.nn as nn
 
-# Criterion (Sum of all the out and aux losses)
-def criterion(inputs, target):
+# Criterion (Sum of cross entropy of out and aux outputs)
+def criterion(outputs, targets):
     losses = {}
-    for name, x in inputs.items():
-        losses[name] = nn.functional.cross_entropy(x, target, ignore_index=border_idx)
+    for name, x in outputs.items():
+        losses[name] = nn.functional.cross_entropy(x, targets, ignore_index=border_idx)
     if len(losses) == 1:
         return losses["out"]
     return losses["out"] + 0.5 * losses["aux"]
@@ -190,8 +190,8 @@ def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
     inputs = batch[0].to(device)
     targets = batch[1].to(device)
-    output = model(inputs)
-    return criterion(output, targets)
+    outputs = model(inputs)
+    return criterion(outputs, targets)
 
 def training_step(batch, batch_idx, device, model, criterion):
     """Training step per batch"""
