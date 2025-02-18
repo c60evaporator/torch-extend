@@ -122,9 +122,9 @@ def show_image_and_target(img, target, ax=None):
 
 train_iter = iter(train_dataloader)
 imgs, targets = next(train_iter)
-# for i, (img, target) in enumerate(zip(imgs, targets)):
-#     show_image_and_target(img, target)
-#     plt.show()
+for i, (img, target) in enumerate(zip(imgs, targets)):
+    show_image_and_target(img, target)
+    plt.show()
 
 # %% Define the model
 ###### 4. Define the model ######

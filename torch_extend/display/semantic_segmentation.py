@@ -20,7 +20,7 @@ from ..metrics.semantic_segmentation import segmentation_ious_one_image
 #     pattern_list.append([255, 255, 255])
 #     return np.array(pattern_list, dtype=np.uint8)
 
-def _create_segmentation_palette():
+def create_segmentation_palette():
     """
     # Color palette for segmentation masks
     """
@@ -28,7 +28,8 @@ def _create_segmentation_palette():
     palette = [list(int(ip[i:i+2],16) for i in (1, 3, 5)) for ip in palette]  # Convert hex to RGB
     return palette
 
-def array1d_to_pil_image(array: torch.Tensor, palette: List[List[int]], bg_idx=None, border_idx=None):
+def array1d_to_pil_image(array: torch.Tensor, palette: List[List[int]], 
+                         bg_idx=None, border_idx=None, occlusion_idx=None):
     """
     Convert 1D class image to colored PIL image
 
@@ -38,6 +39,12 @@ def array1d_to_pil_image(array: torch.Tensor, palette: List[List[int]], bg_idx=N
         Input image whose value indicate the class label
     palette : List ([[R1, G1, B1], [R2, G2, B2],..])
         Color palette for specifying the classes
+    border_idx : int
+        The index of the border in the target mask.
+    bg_idx : int
+        The index of the background in the target mask.
+    occlusion_idx : int
+        The index of the occlusion in the target mask (for Instance Segmentation).
     """
     # Replace the background
     if bg_idx is not None:
@@ -45,6 +52,9 @@ def array1d_to_pil_image(array: torch.Tensor, palette: List[List[int]], bg_idx=N
     # Replace the border
     if border_idx is not None:
         palette[border_idx] = [0, 0, 0]
+    # Replace the occlusion
+    if occlusion_idx is not None:
+        palette[occlusion_idx] = [64, 64, 64]
     # Convert the array from torch.tensor to np.ndarray
     array_numpy = array.detach().to('cpu').numpy().astype(np.uint8)
     # Convert the array
@@ -76,7 +86,7 @@ def show_segmentation(image, target,
     border_idx : int
         Index of the border class
     add_legend : bool
-        If True, the legend of the class labels is added
+        If True, the legend of the class labels is added to the plot
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
         Only available if `add_legend` is true
@@ -92,7 +102,7 @@ def show_segmentation(image, target,
     """
     # Auto palette generation
     if palette is None:
-        palette = _create_segmentation_palette()
+        palette = create_segmentation_palette()
     # If ax is None, use matplotlib.pyplot.gca()
     if ax is None:
         ax=plt.gca()
@@ -154,7 +164,7 @@ def show_segmentations(image, target,
     
     # Auto palette generation
     if palette is None:
-        palette = _create_segmentation_palette()
+        palette = create_segmentation_palette()
     # Plot the segmentation image
     show_segmentation(image, target, alpha, palette, bg_idx, border_idx, 
                       add_legend=True, idx_to_class=idx_to_class,
@@ -215,7 +225,7 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
     """
     # Auto palette generation
     if palette is None:
-        palette = _create_segmentation_palette()
+        palette = create_segmentation_palette()
     # Image loop
     for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
         img = (img*255).to(torch.uint8)  # Change from float[0, 1] to uint[0, 255]

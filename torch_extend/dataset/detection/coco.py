@@ -61,7 +61,7 @@ class CocoDetectionTV(CocoDetection, DetectionOutput):
         # Convert the bounding boxes
         boxes = [[int(k) for k in convert_bbox_xywh_to_xyxy(*box)]
                   for box in boxes]
-        boxes = torch.tensor(boxes, dtype=torch.int64) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.int64)
+        boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Get the image path
         image_path = self.coco.loadImgs(id)[0]["file_name"]
         target = {'boxes': boxes, 'labels': labels, 'image_path': os.path.join(self.root, image_path)}

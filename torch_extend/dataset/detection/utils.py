@@ -37,19 +37,19 @@ class DetectionOutput():
             }
             for i_img, (image, image_fp) in enumerate(zip(images, self.images))
         ]
-        # Create "annotations" field in the annotation file
+        # Create "annotations" field in the annotation file (TODO: Add "segmentation" field by cv2.approxPolyDP)
         ann_annotations = []
         obj_id_cnt = 0
         for i_img, target in enumerate(targets):
             for obj in target:
                 obj_ann = {
                     'segmentation': [],
-                    'area': 0,
-                    'iscrowd': 0,
-                    'image_id': i_img,
-                    'bbox': obj['bbox'],
-                    'category_id': obj['category_id'],
-                    'id': obj_id_cnt
+                    'area': obj['area'] if 'area' in obj.keys() else 0,
+                    'iscrowd': obj['iscrowd'] if 'iscrowd' in obj.keys() else 0,
+                    'image_id': obj['image_id'] if 'image_id' in obj.keys() else i_img,
+                    'bbox': obj['boxes'],
+                    'category_id': obj['category_id'] if 'category_id' in obj.keys() else 0,
+                    'id': obj['id'] if 'id' in obj.keys() else obj_id_cnt,
                 }
                 obj_id_cnt += 1
                 ann_annotations.append(obj_ann)

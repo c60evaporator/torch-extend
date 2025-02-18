@@ -15,15 +15,15 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
                         anomaly_indices=None,
                         ax=None):
     """
-    Show the image with the segmentation.
+    Show the image with the bounding boxes.
 
     Parameters
     ----------
-    image : torch.Tensor (C x H x W)
+    image : torch.Tensor (C, H, W)
         Input image
     boxes : torch.Tensor (N, 4)
         Bounding boxes with Torchvision object detection format
-    labels : List[str]
+    labels : torch.Tensor (N)
         Target labels of the bounding boxes
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.

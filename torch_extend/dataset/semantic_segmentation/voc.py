@@ -8,7 +8,7 @@ from ...dataset.detection.voc import VOCBaseTV
 from .utils import SemanticSegOutput
 
 class VOCSemanticSegmentation(VOCBaseTV, SemanticSegOutput):
-    """`Pascal VOC <http://host.robots.ox.ac.uk/pascal/VOC/>`_ Segmentation Dataset.
+    """`Pascal VOC <http://host.robots.ox.ac.uk/pascal/VOC/>`_ Semantic Segmentation Dataset.
 
     Parameters
     ----------
@@ -16,12 +16,14 @@ class VOCSemanticSegmentation(VOCBaseTV, SemanticSegOutput):
         Root directory of the VOC Dataset.
     idx_to_class : Dict[int, str]
         A dict which indicates the conversion from the label indices to the label names
-    image_set : str
-        Select the image_set to use, ``"train"``, ``"trainval"`` or ``"val"``.
     border_idx : int
         The index of the border in the target mask.
     bg_idx : int
         The index of the background in the target mask.
+    image_set : str
+        Select the image_set to use, ``"train"``, ``"trainval"`` or ``"val"``.
+    download : bool, optional
+        If true, downloads VOC2012 dataset from the internet and puts it in root directory.
     transform : callable, optional
         A function/transform that  takes in an PIL image and returns a transformed version. E.g, ``transforms.PILToTensor``
     target_transform : callable, optional
@@ -34,7 +36,7 @@ class VOCSemanticSegmentation(VOCBaseTV, SemanticSegOutput):
         self,
         root: str,
         idx_to_class: Dict[int, str] = None,
-        border_idx: int = None,
+        border_idx: int = 255,
         bg_idx: int = 0,
         image_set: str = "train",
         download: bool = False,
@@ -49,21 +51,27 @@ class VOCSemanticSegmentation(VOCBaseTV, SemanticSegOutput):
             self.idx_to_class = idx_to_class
         self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         self.ids = os.listdir(root)
-        self.border_idx = border_idx if border_idx is not None else len(self.idx_to_class)
+        self.border_idx = border_idx
         self.bg_idx = bg_idx
 
     def __len__(self) -> int:
         return len(self.images_semantic)
+    
+    def _load_image(self, index: int) -> Image.Image:
+        return Image.open(self.images_semantic[index]).convert("RGB")
+    
+    def _load_target(self, index: int) -> List[Any]:
+        return Image.open(self.masks_semantic[index])
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         """"""
-        image = Image.open(self.images_semantic[index]).convert("RGB")
-        target = Image.open(self.masks[index])
+        image = self._load_image(index)
+        mask = self._load_target(index)
 
         if self.transforms is not None:
             # Albumentation transforms
             if isinstance(self.transforms, A.Compose):
-                transformed = self.transforms(image=np.array(image), mask=np.asarray(target).copy())
+                transformed = self.transforms(image=np.array(image), mask=np.asarray(mask).copy())
                 image, target = transformed['image'], transformed['mask']
             # TorchVision transforms
             else:
@@ -71,10 +79,9 @@ class VOCSemanticSegmentation(VOCBaseTV, SemanticSegOutput):
 
         # Postprocessing of the target
         target = target.squeeze(0).long()  # Convert to int64
-        target[target == 255] = self.border_idx  # Replace the border index of the target mask
 
         return image, target
     
     def get_image_target_path(self, index: int):
         """Get the image and target path of the dataset."""
-        return self.images_semantic[index], self.masks[index]
+        return self.images_semantic[index], self.masks_semantic[index]

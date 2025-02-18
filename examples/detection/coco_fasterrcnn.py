@@ -31,7 +31,6 @@ LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
 # Metrics Parameters
 AP_IOU_THRESHOLD = 0.5
-AP_CONF_THRESHOLD = 0.0
 
 # Select the device
 DEVICE = 'cuda'
@@ -226,7 +225,7 @@ def calc_epoch_metrics(preds, targets):
     # Calculate the mean Average Precision
     aps = average_precisions(preds, targets,
                              idx_to_class_bg, 
-                             iou_threshold=AP_IOU_THRESHOLD, conf_threshold=AP_CONF_THRESHOLD)
+                             iou_threshold=AP_IOU_THRESHOLD)
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
     global last_aps
     last_aps = aps

@@ -93,8 +93,8 @@ class YoloDetection(VisionDataset, DetectionOutput):
         boxes = [[int(k) for k in convert_bbox_centerxywh_to_xyxy(*box)]
                   for box in boxes]
         # Convert normalized coordinates to raw coordinates
-        boxes = torch.tensor(boxes) * torch.tensor([w, h, w, h], dtype=torch.int64) if len(boxes) > 0 \
-                else torch.zeros(size=(0, 4), dtype=torch.int64)
+        boxes = torch.tensor(boxes) * torch.tensor([w, h, w, h], dtype=torch.float32) if len(boxes) > 0 \
+                else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Get the image path
         target = {'boxes': boxes, 'labels': labels, 'image_path': self.images[index]}
         return target

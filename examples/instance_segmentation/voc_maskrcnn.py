@@ -12,7 +12,7 @@ sys.path.append(ROOT)
 EPOCHS = 4
 BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
-DATA_ROOT = './datasets/VOC2012'
+DATA_ROOT = '../detection/datasets/VOC2012'
 # Optimizer Parameters
 OPT_NAME = 'sgd'
 LR = 0.005
@@ -64,26 +64,20 @@ eval_transform = A.Compose([
     ToTensorV2()  # Convert from numpy.ndarray to torch.Tensor
 ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
-from torchvision.transforms import v2
-transform = v2.Compose([
-    v2.ToImage(),  # Convert from PIL.Image to a torch.Tensor
-    v2.ToDtype(torch.float32, scale=True)  # Convert from uint8 [0, 255] to float32 [0.0, 1.0]
-])
-
 # %% Define the dataset
 ###### 3. Define the dataset ######
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import VOCDetectionTV
-from torch_extend.display.detection import show_bounding_boxes
+from torch_extend.dataset import VOCInstanceSegmentation
+from torch_extend.display.instance_segmentation import show_instance_masks
 
 # Dataset
-train_dataset = VOCDetectionTV(DATA_ROOT, image_set='train', download=True,
-                               transforms=train_transform)
-val_dataset = VOCDetectionTV(DATA_ROOT, image_set='val',
-                             transforms=eval_transform)
+train_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='train', download=True,
+                                        transforms=train_transform)
+val_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='val',
+                                      transforms=eval_transform)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
@@ -113,8 +107,10 @@ def show_image_and_target(img, target, ax=None):
     # img = denormalize_image(img)
     # Show the image
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
-    boxes, labels = target['boxes'], target['labels']
-    show_bounding_boxes(img, boxes, labels=labels,
+    boxes, labels, masks = target['boxes'], target['labels'], target['masks']
+    show_instance_masks(img, boxes, masks=masks,
+                        border_mask=target['border_mask'] if 'border_mask' in target else None,
+                        labels=labels,
                         idx_to_class=idx_to_class, ax=ax)
 
 train_iter = iter(train_dataloader)
@@ -125,16 +121,19 @@ for i, (img, target) in enumerate(zip(imgs, targets)):
 
 # %% Define the model
 ###### 4. Define the model ######
-from torchvision.models.detection import faster_rcnn
+from torchvision.models.detection import mask_rcnn, faster_rcnn
 
-model = faster_rcnn.fasterrcnn_resnet50_fpn(weights=faster_rcnn.FasterRCNN_ResNet50_FPN_Weights.COCO_V1)
+model = mask_rcnn.maskrcnn_resnet50_fpn(weights=mask_rcnn.MaskRCNN_ResNet50_FPN_Weights.COCO_V1)
 # Freeze the parameters
 for name, param in model.named_parameters():
     param.requires_grad = False
-# Replace layers for transfer learning
+# Replace layers for transfer learning (https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#object-detection-and-instance-segmentation-model-for-pennfudan-dataset)
 num_classes = max(class_to_idx.values()) + 1
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
+in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
+hidden_layer = 256
+model.roi_heads.mask_predictor = mask_rcnn.MaskRCNNPredictor(in_features_mask, hidden_layer, num_classes)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
@@ -179,7 +178,7 @@ from torch_extend.metrics.detection import average_precisions
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
     inputs = [img.to(device) for img in batch[0]]
-    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
+    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items() if k in ['boxes', 'labels', 'masks']}
                 for t in batch[1]]
     loss_dict = model(inputs, targets)
     return criterion(loss_dict)
@@ -225,8 +224,8 @@ def calc_epoch_metrics(preds, targets):
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
     global last_aps
     last_aps = aps
-    print(f'mAP@{int(AP_IOU_THRESHOLD*100)}={mean_average_precision}')
-    return {f'mAP@{int(AP_IOU_THRESHOLD*100)}': mean_average_precision}
+    print(f'BoxAP@{int(AP_IOU_THRESHOLD*100)}={mean_average_precision}')
+    return {f'BoxAP@{int(AP_IOU_THRESHOLD*100)}': mean_average_precision}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):

@@ -18,6 +18,26 @@ except ImportError:
 
 from .utils import DetectionOutput
 
+def parse_voc_xml(node: ET_Element) -> Dict[str, Any]:
+    """
+    From torchvision.datasets.VOCDetection.parse_voc_xml
+    """
+    voc_dict: Dict[str, Any] = {}
+    children = list(node)
+    if children:
+        def_dic: Dict[str, Any] = collections.defaultdict(list)
+        for dc in map(parse_voc_xml, children):
+            for ind, v in dc.items():
+                def_dic[ind].append(v)
+        if node.tag == "annotation":
+            def_dic["object"] = [def_dic["object"]]
+        voc_dict = {node.tag: {ind: v[0] if len(v) == 1 else v for ind, v in def_dic.items()}}
+    if node.text:
+        text = node.text.strip()
+        if not children:
+            voc_dict[node.tag] = text
+    return voc_dict
+
 class VOCBaseTV(VisionDataset):
     IDX_TO_CLASS = {
         0: 'background',
@@ -43,7 +63,7 @@ class VOCBaseTV(VisionDataset):
         20: 'tvmonitor'
     }
     
-    def _get_images_targets(self, root, image_set, splits_dir_name, target_dir_name, target_file_ext):
+    def _get_images_targets(self, root, image_set, splits_dir_name, target_dir_name, target_file_ext, aux_target_dir_name=None):
         # Get the path list of images and targets
         splits_dir = os.path.join(root, "ImageSets", splits_dir_name)
         split_f = os.path.join(splits_dir, image_set.rstrip("\n") + ".txt")
@@ -55,9 +75,15 @@ class VOCBaseTV(VisionDataset):
         # Get the targets
         target_dir = os.path.join(root, target_dir_name)
         targets = [os.path.join(target_dir, x + target_file_ext) for x in file_names]
+        # Get the aux targets (Bounding boxes for instance segmentation)
+        aux_targets = None
+        if aux_target_dir_name is not None:
+            aux_target_dir = os.path.join(root, aux_target_dir_name)
+            aux_targets = [os.path.join(aux_target_dir, x + '.xml') for x in file_names]
+            assert len(images) == len(aux_targets)
 
         assert len(images) == len(targets)
-        return images, targets
+        return images, targets, aux_targets
 
     def __init__(
         self,
@@ -93,16 +119,17 @@ class VOCBaseTV(VisionDataset):
         if not os.path.isdir(root):
             raise RuntimeError("Dataset not found or corrupted")
         
-        # Get the images and targets for Object Detection
-        self.images_detection, self.bboxes = self._get_images_targets(root, image_set, "Main", "Annotations", ".xml")
+        # Get the images and bboxes for Object Detection
+        self.images_detection, self.bboxes_detection, _ = self._get_images_targets(root, image_set, "Main", "Annotations", ".xml")
 
-        # Get the images and targets for Semantic Segmentation
+        # Get the images and masks for Semantic Segmentation
         if "SegmentationClass" in os.listdir(root):
-            self.images_semantic, self.masks = self._get_images_targets(root, image_set, "Segmentation", "SegmentationClass", ".png")
+            self.images_semantic, self.masks_semantic, _ = self._get_images_targets(root, image_set, "Segmentation", "SegmentationClass", ".png")
 
-        # Get the images and targets for Instance Segmentation
+        # Get the images, masks, and bboxes for Instance Segmentation
         if "SegmentationObject" in os.listdir(root):
-            self.images_instance, self.instances = self._get_images_targets(root, image_set, "Segmentation", "SegmentationObject", ".png")
+            self.images_instance, self.masks_instance, self.bboxes_instance = self._get_images_targets(
+                root, image_set, "Segmentation", "SegmentationObject", ".png", aux_target_dir_name="Annotations")
 
 class VOCDetectionTV(VOCBaseTV, DetectionOutput):
     """
@@ -152,28 +179,28 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
     
     def _load_target(self, index: int) -> List[Any]:
         # Read XML file 
-        target = self.parse_voc_xml(ET_parse(self.bboxes[index]).getroot())
+        target = parse_voc_xml(ET_parse(self.bboxes_detection[index]).getroot())
         objects = target['annotation']['object']
         # Get the labels
         labels = [self.class_to_idx[obj['name']] for obj in objects]
         # Get the bounding boxes
         box_keys = ['xmin', 'ymin', 'xmax', 'ymax']
         boxes = [[int(obj['bndbox'][k]) for k in box_keys] for obj in objects]
-        return labels, boxes
+        return boxes, labels
     
     def _convert_target(self, boxes, labels, index):
         """Convert VOC to TorchVision format"""
         # Get the labels
         labels = torch.tensor(labels, dtype=torch.int64)
         # Convert the bounding boxes
-        boxes = torch.tensor(boxes, dtype=torch.int64) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.int64)
+        boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Get the image path
         target = {'boxes': boxes, 'labels': labels, 'image_path': self.images_detection[index]}
         return target
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         image = self._load_image(index)
-        labels, boxes = self._load_target(index)
+        boxes, labels = self._load_target(index)
 
         if self.transforms is not None:
             # Albumentation transforms
@@ -191,24 +218,3 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
             target = self._convert_target(boxes, labels, index)
 
         return image, target
-    
-    @staticmethod
-    def parse_voc_xml(node: ET_Element) -> Dict[str, Any]:
-        """
-        From torchvision.datasets.VOCDetection.parse_voc_xml
-        """
-        voc_dict: Dict[str, Any] = {}
-        children = list(node)
-        if children:
-            def_dic: Dict[str, Any] = collections.defaultdict(list)
-            for dc in map(VOCDetectionTV.parse_voc_xml, children):
-                for ind, v in dc.items():
-                    def_dic[ind].append(v)
-            if node.tag == "annotation":
-                def_dic["object"] = [def_dic["object"]]
-            voc_dict = {node.tag: {ind: v[0] if len(v) == 1 else v for ind, v in def_dic.items()}}
-        if node.text:
-            text = node.text.strip()
-            if not children:
-                voc_dict[node.tag] = text
-        return voc_dict

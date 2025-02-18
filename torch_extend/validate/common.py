@@ -3,6 +3,8 @@ from torchvision.transforms import v2
 
 def validate_same_img_size(transforms):
     """Check if the transforms resize/crop the images to the same size"""
+    if transforms is None:
+        return False
     for t in transforms.transforms:
         if isinstance(t, A.Resize) or \
            isinstance(t, A.RandomCrop) or \
