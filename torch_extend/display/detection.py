@@ -7,7 +7,7 @@ import copy
 import math
 import numpy as np
 
-from ..metrics.detection import iou_object_detection, extract_cofident_boxes
+from ..metrics import detection as det
 
 def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
                         colors=None, fill=False, width=1,
@@ -70,7 +70,7 @@ def _show_pred_true_boxes(image,
                           boxes_true, labels_true,
                           idx_to_class = None,
                           color_true = 'green', color_pred = 'red', ax=None,
-                          scores=None, conf_threshold=0.0, score_decimal=3,
+                          scores=None, score_decimal=3,
                           calc_iou=False, iou_decimal=3):
     """
     Show the true bounding boxes and the predicted bounding boxes
@@ -97,7 +97,7 @@ def _show_pred_true_boxes(image,
     scores : torch.Tensor (N_boxes_pred)
         Confidence scores for the predicted bounding boxes.
         
-        If None, the confidence scores are not displayed and conf_threshold is not applied. 
+        If None, the confidence scores are not displayed. 
     conf_threshold : float
         A threshold of the confidence score for selecting predicted bounding boxes shown.
     score_decimal : str
@@ -110,6 +110,9 @@ def _show_pred_true_boxes(image,
     # If ax is None, use matplotlib.pyplot.gca()
     if ax is None:
         ax=plt.gca()
+    # If scores is None, create dummy scores
+    if scores is None:
+        scores = [float('nan')] * len(boxes_pred)
     # Convert class IDs to class names
     if idx_to_class is not None:
         labels_pred = [idx_to_class[label.item()] for label in labels_pred]
@@ -126,28 +129,18 @@ def _show_pred_true_boxes(image,
                               height=box_true[3]-box_true[1], 
                               ec=color_true, fill=False)
         ax.add_patch(r)
-        plt.text(box_true[0], box_true[1], label_true, color=color_true, fontsize=8)
+        ax.text(box_true[0], box_true[1], label_true, color=color_true, fontsize=8)
 
-    # Extract predicted boxes whose score > conf_threshold
-    if scores is not None:
-        boxes_confident, labels_confident, scores_confident = extract_cofident_boxes(
-                scores, boxes_pred, labels_pred, conf_threshold)
-        print(f'Confident boxes={boxes_confident}, labels={labels_confident}')
-    # Extract all predicted boxes if score is not set
-    else:
-        boxes_confident = copy.deepcopy(boxes_pred)
-        labels_confident = copy.deepcopy(labels_pred)
-        scores_confident = [float('nan')] * len(boxes_pred)
     # Calculate IoU
     if calc_iou:
         ious_confident = [
-            iou_object_detection(box_pred, label_pred, boxes_true, labels_true)
-            for box_pred, label_pred in zip(boxes_confident, labels_confident)
+            det.iou_object_detection(box_pred, label_pred, boxes_true, labels_true)
+            for box_pred, label_pred in zip(boxes_pred, labels_pred)
         ]
     else:
         ious_confident = [float('nan')] * len(boxes_pred)
     # Display predicted boxes
-    for box_pred, label_pred, score, iou in zip(boxes_confident, labels_confident, scores_confident, ious_confident):
+    for box_pred, label_pred, score, iou in zip(boxes_pred, labels_pred, scores, ious_confident):
         # Show Rectangle
         r = patches.Rectangle(xy=(box_pred[0], box_pred[1]), 
                               width=box_pred[2]-box_pred[0], 
@@ -164,11 +157,9 @@ def _show_pred_true_boxes(image,
             else:
                 text_pred += ', FP'
         ax.text(box_pred[0], box_pred[1], text_pred, color=color_pred, fontsize=8)
-    # Return result
-    return boxes_confident, labels_confident, scores_confident, ious_confident
 
 def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
-                          max_displayed_images=None, conf_threshold=0.5):
+                          max_displayed_images=10, conf_threshold=0.5):
     """
     Show minibatch images with predicted bounding boxes.
 
@@ -202,24 +193,29 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
         boxes = pred['boxes'].cpu().detach()
         labels = pred['labels'].cpu().detach().numpy()
         labels = np.where(labels>=len(idx_to_class),-1, labels)  # Modify labels to 0 if the predicted labels are background
-        scores = pred['scores'].cpu().detach().numpy()
-        print(f'idx={i}')
-        print(f'labels={labels}')
-        print(f'scores={scores}')
-        print(f'boxes={boxes}')
+        scores = pred['scores'].cpu().detach().numpy() if 'scores' in pred else None
         # Show all bounding boxes
         show_bounding_boxes(img, boxes, labels=labels, idx_to_class=idx_to_class)
         plt.title('All bounding boxes')
         plt.show()
-        # Show Pred bounding boxes whose confidence score > conf_threshold with True boxes
+        # Filter out confident bounding boxes whose confidence score > conf_threshold
+        if scores is not None:
+            boxes_confident, labels_confident, scores_confident, _ = det.extract_cofident_boxes(
+                    boxes, labels, scores, conf_threshold)
+        # Extract all predicted boxes if score is not set
+        else:
+            boxes_confident = copy.deepcopy(boxes)
+            labels_confident = copy.deepcopy(labels)
+            scores_confident = None
+        # Show the confident bounding boxes with True boxes
         boxes_true = target['boxes']
         labels_true = target['labels']
-        boxes_confident, labels_confident, scores_confident, ious_confident = \
-            _show_pred_true_boxes(img, boxes, labels, boxes_true, labels_true,
-                                  idx_to_class=idx_to_class,
-                                  scores=scores, conf_threshold=conf_threshold,
-                                  calc_iou=True)
-        plt.title('Confident bounding boxes')
+        _show_pred_true_boxes(img, boxes_confident, labels_confident, 
+                              boxes_true, labels_true,
+                              idx_to_class=idx_to_class,
+                              scores=scores_confident,
+                              calc_iou=True)
+        plt.title(f'Confident bounding boxes (confident score > {conf_threshold})')
         plt.show()
         if max_displayed_images is not None and i >= max_displayed_images - 1:
             break

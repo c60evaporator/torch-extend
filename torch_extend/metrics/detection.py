@@ -42,17 +42,42 @@ def iou_object_detection(box_pred, label_pred, boxes_true, labels_true,
     return max_iou
 
 
-def extract_cofident_boxes(scores, boxes, labels, conf_threshold):
-    """Extract bounding boxes whose score > conf_threshold"""
+def extract_cofident_boxes(boxes, labels, scores, conf_threshold, masks=None):
+    """
+    Extract bounding boxes whose score > conf_threshold
+
+    Parameters
+    ----------    
+    boxes : array-like of shape (n_boxes, 4)
+        A float array of bounding boxes in the format of (xmin, ymin, xmax, ymax).
+    
+    labels : array-like of shape (n_boxes,)
+        An integer array of class labels.
+
+    scores : array-like of shape (n_boxes,)
+        A float array of confidence scores.
+    
+    conf_threshold : float
+        Bounding boxes whose confidence score exceed this threshold are used as the predicted bounding boxes.
+    
+    masks : array-like of shape (n_boxes, H, W)
+        A float array of masks. This is used for instance segmentation.
+    """
     boxes_confident = []
     labels_confident = []
     scores_confident = []
-    for score, box, label in zip(scores, boxes.tolist(), labels):
+    # Create dummy masks if masks is not set
+    masks_confident = []
+    if masks is None:
+        masks = [None] * len(boxes)
+    # Extract bounding boxes whose score > conf_threshold
+    for score, box, label, mask in zip(scores, boxes.tolist(), labels, masks):
         if score > conf_threshold:
             labels_confident.append(label)
             boxes_confident.append(Tensor(box))
             scores_confident.append(score)
-    return boxes_confident, labels_confident, scores_confident
+            masks_confident.append(mask)
+    return boxes_confident, labels_confident, scores_confident, masks_confident
 
 def _get_recall_precision(scores: np.ndarray, corrects: np.ndarray,
                           smoothe: bool=True):
@@ -188,8 +213,8 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
         boxes_true = target['boxes']
         labels_true = target['labels']
         # Extract predicted boxes whose score > conf_threshold
-        boxes_confident, labels_confident, scores_confident = extract_cofident_boxes(
-                scores_pred, boxes_pred, labels_pred, conf_threshold)
+        boxes_confident, labels_confident, scores_confident, _ = extract_cofident_boxes(
+                boxes_pred, labels_pred, scores_pred, conf_threshold)
         # Calculate IoU
         ious_confident = [
             iou_object_detection(box_pred, label_pred, boxes_true, labels_true)

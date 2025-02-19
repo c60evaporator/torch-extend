@@ -114,13 +114,14 @@ def show_segmentation(image, target,
     ax.imshow(segmentation_img, alpha=alpha)
     # Add legend
     if add_legend:
-        labels_unique = torch.unique(target).cpu().detach().numpy()
+        labels_unique = torch.unique(target).cpu().detach().numpy().tolist()
         # Convert class IDs to class names
         if idx_to_class is None:
-            idx_to_class_bd = {idx: str(idx) for idx in range(np.max(labels_unique))}
+            idx_to_class_bd = {idx: str(idx) 
+                               for idx in range(np.max(labels_unique[labels_unique != border_idx]))}
         else:
             idx_to_class_bd = {k: v for k, v in idx_to_class.items()}
-        # Add the border label to idx_to_class
+        # Add the border label
         if border_idx is not None:
             idx_to_class_bd[border_idx] = 'border'
         # Make the label text with IoU scores
@@ -232,7 +233,7 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
         predicted_labels = pred.argmax(0).cpu().detach()
         print(f'idx={i}')
         # Create a camvas
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         # Plot the true segmentation
         show_segmentation(img, target, alpha, palette, bg_idx, border_idx, 
                           add_legend=True, idx_to_class=idx_to_class, 

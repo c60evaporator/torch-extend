@@ -71,24 +71,28 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
         box_keys = ['xmin', 'ymin', 'xmax', 'ymax']
         boxes = [[int(obj['bndbox'][k]) for k in box_keys] for obj in objects]
         # Read the mask
-        mask = Image.open(self.masks_semantic[index])
+        mask = Image.open(self.masks_instance[index])
         mask = np.array(mask, dtype=np.uint8)
-        instance_ids = np.unique(mask)[1:]  # Remove background (0)
-        instance_ids = instance_ids[instance_ids != self.border_idx]  # Remove border
+        # Instance validation
+        instance_ids = np.arange(1, len(labels)+1)
+        mask_instances = np.unique(mask)[1:]  # Remove background (0)
+        mask_instances = mask_instances[mask_instances != self.border_idx]  # Remove border
+        if not np.array_equal(mask_instances, instance_ids):
+            print(f'Warning: Bounding box with empty mask found in image{index}, creating dummy mask.')
         # Split the mask into instance masks
         masks = [(mask == instance_id).astype(np.uint8) for instance_id in instance_ids]
         # Border mask
         border_mask = (mask == self.border_idx).astype(np.uint8)
         return boxes, labels, masks, border_mask
     
-    def _convert_target(self, boxes, labels, masks, border_mask, index):
+    def _convert_target(self, boxes, labels, masks, border_mask, index, w, h):
         """Convert VOC to TorchVision format"""
         # Get the labels
         labels = torch.tensor(labels, dtype=torch.int64) if len(boxes) > 0 else torch.zeros(size=(0,), dtype=torch.float32)
         # Convert the bounding boxes
         boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Convert the instance masks
-        masks = torch.stack([mask if isinstance(mask, torch.Tensor) else torch.tensor(mask, dtype=torch.uint8) for mask in masks]) if len(masks) > 0 else torch.zeros(size=(0,), dtype=torch.uint8)
+        masks = torch.stack([mask if isinstance(mask, torch.Tensor) else torch.tensor(mask, dtype=torch.uint8) for mask in masks]) if len(masks) > 0 else torch.zeros(size=(0, h, w), dtype=torch.uint8)
         # Border mask
         border_mask = torch.tensor(border_mask, dtype=torch.uint8)
         # Miscellaneous fields
@@ -110,6 +114,10 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
         """"""
         image = self._load_image(index)
         boxes, labels, masks, border_mask = self._load_target(index)
+        w, h = image.size
+        if len(masks) == 0:  # masks cannot be empty in Albumentations, so we add a dummy mask
+            print('Warning: Empty masks found, creating dummy masks')
+            masks = [np.zeros((h, w), dtype=np.uint8)]
 
         if self.transforms is not None:
             # Albumentation transforms
@@ -119,14 +127,14 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
                 target = self._convert_target(transformed['bboxes'], 
                                               transformed['class_labels'],
                                               transformed['masks'],
-                                              border_mask, index)
+                                              border_mask, index, w, h)
             # TorchVision transforms
             else:
-                converted_target = self._convert_target(boxes, labels, masks, border_mask, index)
+                converted_target = self._convert_target(boxes, labels, masks, border_mask, index, w, h)
                 image, target = self.transforms(image, converted_target)
         # No transformation
         else:
-            target = self._convert_target(boxes, labels, masks, border_mask, index)
+            target = self._convert_target(boxes, labels, masks, border_mask, index, w, h)
 
         return image, target
     

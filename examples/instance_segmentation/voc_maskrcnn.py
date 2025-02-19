@@ -108,7 +108,7 @@ def show_image_and_target(img, target, ax=None):
     # Show the image
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
     boxes, labels, masks = target['boxes'], target['labels'], target['masks']
-    show_instance_masks(img, boxes, masks=masks,
+    show_instance_masks(img, masks=masks, boxes=boxes,
                         border_mask=target['border_mask'] if 'border_mask' in target else None,
                         labels=labels,
                         idx_to_class=idx_to_class, ax=ax)
@@ -262,9 +262,6 @@ def val_one_epoch(loader, device, model,
                                    val_batch_preds, val_batch_targets)
             if loss is not None:
                 val_step_losses.append(loss.detach().item())  # Record the loss
-            # Plot the predicted bounding boxes
-            # if batch_idx == 0:
-            #     show_predicted_bboxes(batch[0], val_batch_preds, val_batch_targets, idx_to_class_bg)
     torch.set_grad_enabled(True)
     model.train()
     # Calculate the metrics
@@ -324,13 +321,14 @@ fig.tight_layout()
 plt.show()
 
 #%% Plot predicted bounding boxes in the first minibatch of the validation dataset
-from torch_extend.display.detection import show_predicted_bboxes
+from torch_extend.display.instance_segmentation import show_predicted_instances
 
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
 preds, targets = val_predict((imgs, targets), device, model)
-show_predicted_bboxes(imgs, preds, targets, idx_to_class_bg)
+show_predicted_instances(imgs, preds, targets, idx_to_class_bg,
+                         border_mask=targets['border_mask'] if 'border_mask' in targets else None)
 
 #%% Plot Average Precisions
 # Plot Average Precisions
