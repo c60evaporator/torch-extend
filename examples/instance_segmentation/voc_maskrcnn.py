@@ -82,9 +82,6 @@ val_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='val',
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
-# Index to class dict with background
-idx_to_class_bg = {k: v for k, v in idx_to_class.items()}
-idx_to_class_bg[-1] = 'background'
 
 # Dataloader
 def collate_fn(batch):
@@ -219,7 +216,7 @@ def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Calculate the mean Average Precision
     aps = average_precisions(preds, targets,
-                             idx_to_class_bg, 
+                             idx_to_class,
                              iou_threshold=AP_IOU_THRESHOLD)
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
     global last_aps
@@ -327,7 +324,7 @@ model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
 preds, targets = val_predict((imgs, targets), device, model)
-show_predicted_instances(imgs, preds, targets, idx_to_class_bg,
+show_predicted_instances(imgs, preds, targets, idx_to_class,
                          border_mask=targets['border_mask'] if 'border_mask' in targets else None)
 
 #%% Plot Average Precisions

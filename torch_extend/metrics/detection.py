@@ -4,6 +4,7 @@ from torchvision import ops
 from torch.utils.data import DataLoader
 from sklearn.metrics import auc
 import numpy as np
+import pandas as pd
 import copy
 import time
 
@@ -194,6 +195,9 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
     aps : Dict[int, Dict[Literal['label_name', 'average_precision', 'precision', 'recall'], Any]]
         Calculated average precisions with the label_names and the PR Curve
     """
+    DEBUG = True
+
+    # Set the default value of conf_threshold
     if conf_threshold is None:
         conf_threshold = 0.0
     # List for storing scores
@@ -201,14 +205,18 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
     scores_all = []
     ious_all = []
     correct_all = []
+    # For debugging
+    image_ids_all = []
+    boxes_all = []
     ###### Calculate IoU ######
     # Loop of images
     for i, (prediction, target) in enumerate(zip(predictions, targets)):
         # Get predicted bounding boxes
         boxes_pred = prediction['boxes'].cpu().detach()
         labels_pred = prediction['labels'].cpu().detach().numpy()
-        labels_pred = np.where(labels_pred >= max(idx_to_class.keys()),-1, labels_pred)  # Modify labels to 0 if the predicted labels are background
         scores_pred = prediction['scores'].cpu().detach().numpy()
+        # Change the label to -1 if the predicted label is not in idx_to_class
+        labels_pred = np.where(np.isin(labels_pred, list(idx_to_class.keys())), labels_pred, -1)
         # Get true bounding boxes
         boxes_true = target['boxes']
         labels_true = target['labels']
@@ -216,27 +224,58 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
         boxes_confident, labels_confident, scores_confident, _ = extract_cofident_boxes(
                 boxes_pred, labels_pred, scores_pred, conf_threshold)
         # Calculate IoU
-        ious_confident = [
+        ious_confident = np.array([
             iou_object_detection(box_pred, label_pred, boxes_true, labels_true)
             for box_pred, label_pred in zip(boxes_confident, labels_confident)
-        ]
+        ])
         # IoU thresholding
-        iou_judgement = np.where(np.array(ious_confident) > iou_threshold, True, False).tolist()
-        # Store the data on DataFrame
-        labels_pred_all.extend(labels_confident)
-        scores_all.extend(scores_confident)
-        ious_all.extend(ious_confident)
-        correct_all.extend(iou_judgement)
+        iou_judgement = np.where(ious_confident > iou_threshold, True, False)
+        # Store the data
+        labels_pred_all.append(np.array(labels_confident))
+        scores_all.append(np.array(scores_confident))
+        ious_all.append(ious_confident)
+        correct_all.append(iou_judgement)
         if i % 500 == 0:  # Show progress every 500 images
             print(f'Calculating IoU: {i}/{len(predictions)} images')
+        # For debugging
+        if DEBUG:
+            image_ids_all.append(np.full(len(labels_pred), i))
+            boxes_all.append(boxes_pred.numpy())
+
+    # Concatenate the data
+    labels_pred_all = np.concatenate(labels_pred_all)
+    scores_all = np.concatenate(scores_all)
+    ious_all = np.concatenate(ious_all)
+    correct_all = np.concatenate(correct_all)
+
+    # Export prediction and target data to DataFrame for debugging
+    if DEBUG:
+        image_ids_all = np.concatenate(image_ids_all)
+        boxes_all = np.concatenate(boxes_all, axis=0)
+        df_preds = pd.DataFrame({"image": image_ids_all,
+                                 "box_xmin": boxes_all[:,0], "box_ymin": boxes_all[:,1], "box_xmax": boxes_all[:,2], "box_ymax": boxes_all[:,3],
+                                 "label": labels_pred_all,
+                                 "score": scores_all,
+                                 "iou": ious_all,
+                                 "correct": correct_all})
+        df_preds.to_csv('preds_all.csv', index=False)
+        df_targets = [
+            {"image": i, 
+             "box_xmin": target_box[0].item(), "box_ymin": target_box[1].item(), "box_xmax": target_box[2].item(), "box_ymax": target_box[3].item(),
+             "label": target_label.item()}
+            for i, target in enumerate(targets)
+            for target_box, target_label in zip(target['boxes'], target['labels'])
+        ]
+        pd.DataFrame(df_targets).to_csv('target_all.csv', index=False)
+    
     ###### Calculate Average Precision ######
     aps = {}
     # Loop of predicted labels
     for label_pred in sorted(set(labels_pred_all)):
         label_name = idx_to_class[label_pred]
-        label_indices = np.where(np.array(labels_pred_all) == label_pred)
-        scores_label = np.array(scores_all)[label_indices]
-        correct_label = np.array(correct_all)[label_indices]
+        label_indices = np.where(labels_pred_all == label_pred)
+        scores_label = scores_all[label_indices]
+        correct_label = correct_all[label_indices]
         # Calculate the precision-recall curve (PR Curve)
         precision, recall = _get_recall_precision(scores_label, correct_label, smoothe=smoothe)
         # Calculate the average precision

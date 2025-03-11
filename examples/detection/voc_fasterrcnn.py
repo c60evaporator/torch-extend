@@ -88,9 +88,6 @@ val_dataset = VOCDetectionTV(DATA_ROOT, image_set='val',
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
-# Index to class dict with background
-idx_to_class_bg = {k: v for k, v in idx_to_class.items()}
-idx_to_class_bg[-1] = 'background'
 
 # Dataloader
 def collate_fn(batch):
@@ -220,7 +217,7 @@ def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Calculate the mean Average Precision
     aps = average_precisions(preds, targets,
-                             idx_to_class_bg, 
+                             idx_to_class, 
                              iou_threshold=AP_IOU_THRESHOLD)
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
     global last_aps
@@ -265,7 +262,7 @@ def val_one_epoch(loader, device, model,
                 val_step_losses.append(loss.detach().item())  # Record the loss
             # Plot the predicted bounding boxes
             # if batch_idx == 0:
-            #     show_predicted_bboxes(batch[0], val_batch_preds, val_batch_targets, idx_to_class_bg)
+            #     show_predicted_bboxes(batch[0], val_batch_preds, val_batch_targets, idx_to_class)
     torch.set_grad_enabled(True)
     model.train()
     # Calculate the metrics
@@ -331,7 +328,7 @@ model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
 preds, targets = val_predict((imgs, targets), device, model)
-show_predicted_bboxes(imgs, preds, targets, idx_to_class_bg)
+show_predicted_bboxes(imgs, preds, targets, idx_to_class)
 
 #%% Plot Average Precisions
 # Plot Average Precisions

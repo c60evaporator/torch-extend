@@ -143,7 +143,6 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
     
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
-        If None, class ID is used for the plot
 
     border_mask : torch.Tensor (H, W)
         Border mask
@@ -171,10 +170,13 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
         # Prediction
         boxes = pred['boxes'].cpu().detach()
         labels = pred['labels'].cpu().detach().numpy()
-        labels = np.where(labels>=len(idx_to_class),-1, labels)  # Modify labels to 0 if the predicted labels are background
         scores = pred['scores'].cpu().detach().numpy()
         masks = pred['masks'].cpu().detach().squeeze(1)
         masks = torch.round(masks).to(torch.uint8)  # float32(N, 1, H, W) -> uint8(N, H, W)
+        # Change the label to -1 if the predicted label is not in idx_to_class
+        labels = np.where(np.isin(labels, list(idx_to_class.keys())), labels, -1)
+        idx_to_class_uk = {k: v for k, v in idx_to_class.items()}
+        idx_to_class_uk[-1] = 'unknown'
         # Ground truth
         boxes_true = target['boxes']
         labels_true = target['labels']
@@ -198,20 +200,20 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
             # Show Pred bounding boxes whose confidence score > conf_threshold with True boxes
             det._show_pred_true_boxes(img, boxes_confident, labels_confident, 
                                       boxes_true, labels_true,
-                                      idx_to_class=idx_to_class,
+                                      idx_to_class=idx_to_class_uk,
                                       scores=scores_confident,
                                       calc_iou=True, ax=axes[0])
             axes[0].set_title('Bounding boxes')
             # Show the predicted masks
             show_instance_masks(img, masks_conficent, boxes=None,
-                                labels=torch.tensor(labels_confident), idx_to_class=idx_to_class,
+                                labels=torch.tensor(labels_confident), idx_to_class=idx_to_class_uk,
                                 alpha=alpha, palette=palette,
                                 ax=axes[1])
             axes[1].set_title('Predicted masks')
             # Show the ground truth masks
             show_instance_masks(img, masks_true, boxes=None,
                                 border_mask=border_mask,
-                                labels=labels_true, idx_to_class=idx_to_class,
+                                labels=labels_true, idx_to_class=idx_to_class_uk,
                                 alpha=alpha, palette=palette,
                                 ax=axes[2])
             axes[2].set_title('Ground truth masks')

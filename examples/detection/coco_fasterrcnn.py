@@ -98,9 +98,6 @@ for i in range(max(class_to_idx.values())):
     if i not in class_to_idx.values():
         na_cnt += 1
         idx_to_class[i] = f'NA{"{:02}".format(na_cnt)}'
-# Index to class dict with background
-idx_to_class_bg = {k: v for k, v in idx_to_class.items()}
-idx_to_class_bg[-1] = 'background'
 
 # Dataloader
 def collate_fn(batch):
@@ -224,7 +221,7 @@ def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Calculate the mean Average Precision
     aps = average_precisions(preds, targets,
-                             idx_to_class_bg, 
+                             idx_to_class, 
                              iou_threshold=AP_IOU_THRESHOLD)
     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
     global last_aps
@@ -332,7 +329,7 @@ model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
 preds, targets = val_predict((imgs, targets), device, model)
-show_predicted_bboxes(imgs, preds, targets, idx_to_class_bg)
+show_predicted_bboxes(imgs, preds, targets, idx_to_class)
 
 #%% Plot Average Precisions
 # Plot Average Precisions

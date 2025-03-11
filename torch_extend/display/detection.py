@@ -180,7 +180,6 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
     
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
-        If None, class ID is used for the plot
 
     max_displayed_images : int
         number of maximum displayed images. This is in case of big batch size.
@@ -192,10 +191,13 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
         img = (img*255).to(torch.uint8).cpu().detach()  # Change from float[0, 1] to uint[0, 255]
         boxes = pred['boxes'].cpu().detach()
         labels = pred['labels'].cpu().detach().numpy()
-        labels = np.where(labels>=len(idx_to_class),-1, labels)  # Modify labels to 0 if the predicted labels are background
         scores = pred['scores'].cpu().detach().numpy() if 'scores' in pred else None
+        # Change the label to -1 if the predicted label is not in idx_to_class
+        labels = np.where(np.isin(labels, list(idx_to_class.keys())), labels, -1)
+        idx_to_class_uk = {k: v for k, v in idx_to_class.items()}
+        idx_to_class_uk[-1] = 'unknown'
         # Show all bounding boxes
-        show_bounding_boxes(img, boxes, labels=labels, idx_to_class=idx_to_class)
+        show_bounding_boxes(img, boxes, labels=labels, idx_to_class=idx_to_class_uk)
         plt.title('All bounding boxes')
         plt.show()
         # Filter out confident bounding boxes whose confidence score > conf_threshold
@@ -212,7 +214,7 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
         labels_true = target['labels']
         _show_pred_true_boxes(img, boxes_confident, labels_confident, 
                               boxes_true, labels_true,
-                              idx_to_class=idx_to_class,
+                              idx_to_class=idx_to_class_uk,
                               scores=scores_confident,
                               calc_iou=True)
         plt.title(f'Confident bounding boxes (confident score > {conf_threshold})')

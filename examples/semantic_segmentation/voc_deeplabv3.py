@@ -90,9 +90,6 @@ val_dataset = VOCSemanticSegmentation(DATA_ROOT, image_set='val',
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
-# Index to class dict with background
-idx_to_class_bg = {k: v for k, v in idx_to_class.items()}
-idx_to_class_bg[-1] = 'background'
 # Border and Background index
 border_idx = train_dataset.border_idx
 bg_idx = train_dataset.bg_idx
