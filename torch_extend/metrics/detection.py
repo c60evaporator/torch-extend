@@ -169,9 +169,6 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
     targets : List[Dict[Literal['boxes', 'labels'], Tensor]]
         List of the true bounding boxes and labels
 
-    smoothe : bool
-        If True, the precision-recall curve is smoothed to fix the zigzag pattern.
-
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
     
@@ -182,6 +179,9 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
         Bounding boxes whose confidence score exceed this threshold are used as the predicted bounding boxes.
 
         Please set to 0.0 if you follow the general definition of general AP in Object Detection.
+
+    smoothe : bool
+        If True, the precision-recall curve is smoothed to fix the zigzag pattern.
 
     precision_center : bool
         This parameter is used for specifying which value is used as the y value during the calculation of area under curve (AUC).

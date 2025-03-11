@@ -1,4 +1,4 @@
-from typing import Dict, Literal, Any
+from typing import Dict, Literal, List
 import torch
 from torchvision.utils import draw_bounding_boxes
 import matplotlib.pyplot as plt
@@ -6,6 +6,7 @@ import matplotlib.patches as patches
 import copy
 import math
 import numpy as np
+from torchmetrics.detection import MeanAveragePrecision
 
 from ..metrics import detection as det
 
@@ -222,41 +223,117 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
         if max_displayed_images is not None and i >= max_displayed_images - 1:
             break
 
-def show_average_precisions(aps: Dict[int, Dict[Literal['label_name', 'average_precision', 'precision', 'recall'], Any]],
+def show_average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]],
+                            targets: List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]],
+                            idx_to_class: Dict[int, str],
+                            iou_thresholds: List[float]=None,
+                            shown_iou: float=0.5,
+                            rec_thresholds: List[float]=None,
                             score_decimal: int=3):
     """
     Calculate average precisions with TorchVision models and DataLoader
 
     Parameters
     ----------
-    aps : Dict[int, Dict[Literal['label_name', 'average_precision', 'precision', 'recall'], Any]]
-        Average precisions that is calculated by `average_precisions()` function
+    predictions : List[Dict[Literal['boxes', 'labels', 'scores'], Tensor]]
+        List of the predicted bounding boxes, labels, and scores
+
+    targets : List[Dict[Literal['boxes', 'labels'], Tensor]]
+        List of the true bounding boxes and labels
+
+    idx_to_class : Dict[int, str]
+        A dict for converting class IDs to class names.
+
+    iou_thresholds : List[float]
+        IoU thresholds for evaluation. If set to `None` it corresponds to the stepped range `[0.5,...,0.95]` with step `0.05`. Else provide a list of floats.
+    
+    shown_iou: float
+        An IoU threshold for displaying the precision-recall curve.
+
+    rec_thresholds : List[float]
+        Recall thresholds for evaluation. If set to `None` it corresponds to the stepped range `[0.0,...,1.0]` with step `0.01`. Else provide a list of floats.
 
     score_decimal : str
         A decimal for the displayed average precision.
     """
+    # Calculate average precisions by TorchMetrics
+    map_metric = MeanAveragePrecision(iou_type="bbox", class_metrics=True, extended_summary=True,
+                                      iou_thresholds=iou_thresholds, rec_thresholds=rec_thresholds)
+    map_metric.update(predictions, targets)
+    map_score = map_metric.compute()
+    # Validation of iou_thresholds
+    if shown_iou not in map_metric.iou_thresholds:
+        raise ValueError(f"The `shown_iou` argument should be in `iou_thresholds`")
+    shown_idx = map_metric.iou_thresholds.index(shown_iou)
+    # Extract precision curve
+    class_precisions = map_score["precision"].numpy()[shown_idx,:,:,0,-1].T
+    recalls = map_metric.rec_thresholds
+    # Extract average precisions
+    aps = np.mean(map_score["precision"].numpy(), axis=1)
+    iou_class_aps = aps[:,:,0,-1]
+    class_aps = iou_class_aps[shown_idx,:]
+    mean_average_precision = np.mean(class_aps)
+
     fig_mean, ax_mean = plt.subplots(1, 1, figsize=(8, 8))
 
-    for k, v in aps.items():
+    for idx, (ap, precisions) in enumerate(zip(class_aps, class_precisions)):
         # Show each label's PR Curve and average precision
         fig, ax = plt.subplots(1, 1, figsize=(4, 4))
-        ax.plot(np.append(v['recall'], 1.0), np.append(v['precision'], 0.0))
-        ax.set_title(f"{v['label_name']}, index={int(k)}")
+        ax.plot(np.append(recalls, 1.0), np.append(precisions.tolist(), 0.0))
+        ax.set_title(f"{idx_to_class[idx]}, index={idx}")
         ax.set_xlim(0, 1.1)
         ax.set_ylim(0, 1.1)
         ax.text(1.08, 1.08,
-                f"AP={round(v['average_precision'], score_decimal)}",
+                f"AP={round(ap, score_decimal)}",
                 verticalalignment='top', horizontalalignment='right')
         fig.show()
         # Plot PR Curve on the mean average precision graph
-        ax_mean.plot(np.append(v['recall'], 1.0), np.append(v['precision'], 0.0), label=v['label_name'])
+        ax_mean.plot(np.append(recalls, 1.0), np.append(precisions.tolist(), 0.0), label=idx_to_class[idx])
 
-    mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
-    ax_mean.set_title('mean Average Precision (mAP)')
+    ax_mean.set_title(f'mean Average Precision (mAP) @{shown_iou}')
     ax_mean.set_xlim(0, 1.1)
     ax_mean.set_ylim(0, 1.1)
     ax_mean.text(1.08, 1.08,
-                 f"mAP={round(mean_average_precision, score_decimal)}",
+                 f"mAP@{shown_iou}={round(mean_average_precision, score_decimal)}",
                  verticalalignment='top', horizontalalignment='right')
     ax_mean.legend()
     fig_mean.show()
+
+# def show_average_precisions(aps: Dict[int, Dict[Literal['label_name', 'average_precision', 'precision', 'recall'], Any]],
+#                             score_decimal: int=3):
+#     """
+#     Calculate average precisions with TorchVision models and DataLoader
+
+#     Parameters
+#     ----------
+#     aps : Dict[int, Dict[Literal['label_name', 'average_precision', 'precision', 'recall'], Any]]
+#         Average precisions that is calculated by `average_precisions()` function
+
+#     score_decimal : str
+#         A decimal for the displayed average precision.
+#     """
+#     fig_mean, ax_mean = plt.subplots(1, 1, figsize=(8, 8))
+
+#     for k, v in aps.items():
+#         # Show each label's PR Curve and average precision
+#         fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+#         ax.plot(np.append(v['recall'], 1.0), np.append(v['precision'], 0.0))
+#         ax.set_title(f"{v['label_name']}, index={int(k)}")
+#         ax.set_xlim(0, 1.1)
+#         ax.set_ylim(0, 1.1)
+#         ax.text(1.08, 1.08,
+#                 f"AP={round(v['average_precision'], score_decimal)}",
+#                 verticalalignment='top', horizontalalignment='right')
+#         fig.show()
+#         # Plot PR Curve on the mean average precision graph
+#         ax_mean.plot(np.append(v['recall'], 1.0), np.append(v['precision'], 0.0), label=v['label_name'])
+
+#     mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
+#     ax_mean.set_title('mean Average Precision (mAP)')
+#     ax_mean.set_xlim(0, 1.1)
+#     ax_mean.set_ylim(0, 1.1)
+#     ax_mean.text(1.08, 1.08,
+#                  f"mAP={round(mean_average_precision, score_decimal)}",
+#                  verticalalignment='top', horizontalalignment='right')
+#     ax_mean.legend()
+#     fig_mean.show()

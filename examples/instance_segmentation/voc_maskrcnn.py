@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
 
 # General Parameters
-EPOCHS = 4
+EPOCHS = 1
 BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
 DATA_ROOT = '../detection/datasets/VOC2012'
@@ -29,8 +29,6 @@ LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
-# Metrics Parameters
-AP_IOU_THRESHOLD = 0.5
 
 # Select the device
 DEVICE = 'cuda'
@@ -169,6 +167,7 @@ elif LR_SCHEDULER == "reducelronplateau":
 import time
 from tqdm import tqdm
 import numpy as np
+from torchmetrics.detection import MeanAveragePrecision
 
 from torch_extend.metrics.detection import average_precisions
 
@@ -215,14 +214,15 @@ def validation_step(batch, batch_idx, device, model, criterion,
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Calculate the mean Average Precision
-    aps = average_precisions(preds, targets,
-                             idx_to_class,
-                             iou_threshold=AP_IOU_THRESHOLD)
-    mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
-    global last_aps
-    last_aps = aps
-    print(f'BoxAP@{int(AP_IOU_THRESHOLD*100)}={mean_average_precision}')
-    return {f'BoxAP@{int(AP_IOU_THRESHOLD*100)}': mean_average_precision}
+    map_metric = MeanAveragePrecision(iou_type="bbox", class_metrics=True, extended_summary=True)
+    map_metric.update(preds, targets)
+    map_score = map_metric.compute()
+    global last_preds
+    global last_targets
+    last_preds = preds
+    last_targets = targets
+    print(f'BoxAP@50-95={map_score["map"].item()}, BoxAP@50={map_score["map_50"].item()}, BoxAP@75={map_score["map_75"].item()}')
+    return {'BoxAP@50-95': map_score["map"].item(), 'BoxAP@50': map_score["map_50"].item(), 'BoxAP@75': map_score["map_75"].item()}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -331,6 +331,6 @@ show_predicted_instances(imgs, preds, targets, idx_to_class,
 # Plot Average Precisions
 from torch_extend.display.detection import show_average_precisions
 
-show_average_precisions(last_aps)
+show_average_precisions(last_preds, last_targets, idx_to_class)
 
 #%%
