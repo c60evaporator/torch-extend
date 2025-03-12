@@ -1,10 +1,10 @@
-from typing import Any, Callable, List, Dict, Optional, Tuple
+from typing import Any, Callable, List, Dict, Optional, Tuple, Literal
 import torch
-from torchvision import tv_tensors
 import albumentations as A
 import numpy as np
 from PIL import Image
 import os
+from transformers import BaseImageProcessor
 
 import xml.etree.ElementTree as ET
 
@@ -20,6 +20,8 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
         Root directory of the VOC Dataset.
     idx_to_class : Dict[int, str]
         A dict which indicates the conversion from the label indices to the label names
+    output_format : Literal["torchvision", "transformers"]
+        The output format of the image and target, either ``"torchvision"`` or ``"transformers"``.
     border_idx : int
         The index of the border in the target mask.
     image_set : str
@@ -27,23 +29,27 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
     download : bool, optional
         If true, downloads VOC2012 dataset from the internet and puts it in root directory.
     transform : callable, optional
-        A function/transform that  takes in an PIL image and returns a transformed version. E.g, ``transforms.PILToTensor``
+        A function/transform that  takes in an PIL image and returns a transformed version. E.g, ``transforms.PILToTensor``. Not available if ``output_format="transformers"``.
     target_transform : callable, optional
-        A function/transform that takes in the target and transforms it.
+        A function/transform that takes in the target and transforms it. Not available if ``output_format="transformers"``.
     transforms : callable, optional
-        A function/transform that takes input sample and its target as entry and returns a transformed version.
+        A function/transform that takes input sample and its target as entry and returns a transformed version. Not available if ``output_format="transformers"``.
+    processor : callable, optional
+        An image processor instance for HuggingFace Transformers. Only available if ``output_format="transformers"``. 
     """
 
     def __init__(
         self,
         root: str,
         idx_to_class: Dict[int, str] = None,
+        output_format: Literal["torchvision", "transformers"] = "torchvision",
         border_idx: int = 255,
         image_set: str = "train",
         download: bool = False,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
         transforms: Optional[Callable] = None,
+        processor: Optional[BaseImageProcessor] = None,
     ):
         super().__init__(root, image_set, download, transform, target_transform, transforms)
         if idx_to_class is None:
@@ -53,6 +59,16 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
         self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         self.ids = os.listdir(root)
         self.border_idx = border_idx
+        if output_format == "transformers":
+            self.transform = None
+            self.target_transform = None
+            self.transforms = None
+            if processor is None:
+                raise ValueError("`processor` must be provided if `output_format` is 'transformers'")
+            else:
+                self.processor = processor
+        else:
+            self.processor = None
 
     def __len__(self) -> int:
         return len(self.images_instance)

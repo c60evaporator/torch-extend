@@ -280,7 +280,7 @@ def show_average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 's
         # Show each label's PR Curve and average precision
         fig, ax = plt.subplots(1, 1, figsize=(4, 4))
         ax.plot(np.append(recalls, 1.0), np.append(precisions.tolist(), 0.0))
-        ax.set_title(f"{idx_to_class[idx]}, index={idx}")
+        ax.set_title(f"{idx_to_class[idx+1]}, index={idx+1}")
         ax.set_xlim(0, 1.1)
         ax.set_ylim(0, 1.1)
         ax.text(1.08, 1.08,
@@ -288,9 +288,9 @@ def show_average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 's
                 verticalalignment='top', horizontalalignment='right')
         fig.show()
         # Plot PR Curve on the mean average precision graph
-        ax_mean.plot(np.append(recalls, 1.0), np.append(precisions.tolist(), 0.0), label=idx_to_class[idx])
+        ax_mean.plot(np.append(recalls, 1.0), np.append(precisions.tolist(), 0.0), label=idx_to_class[idx+1])
 
-    ax_mean.set_title(f'mean Average Precision (mAP) @{shown_iou}')
+    ax_mean.set_title(f'mean Average Precision (mAP) @IoU={shown_iou}')
     ax_mean.set_xlim(0, 1.1)
     ax_mean.set_ylim(0, 1.1)
     ax_mean.text(1.08, 1.08,

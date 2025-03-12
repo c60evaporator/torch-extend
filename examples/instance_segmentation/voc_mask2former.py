@@ -68,7 +68,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import 
+from torch_extend.dataset import VOCInstanceSegmentation
 from torch_extend.display.instance_segmentation import show_instance_masks
 
 # Dataset
@@ -116,7 +116,24 @@ for i, (img, target) in enumerate(zip(imgs, targets)):
 
 # %% Define the model
 ###### 4. Define the model ######
-from torchvision.models.detection import mask_rcnn, faster_rcnn
+from transformers import Mask2FormerForUniversalSegmentation, AutoImageProcessor
+
+# Specify the model name from the Hugging Face Model Hub (https://huggingface.co/models?sort=downloads&search=mask2former)
+# Reference https://github.com/facebookresearch/Mask2Former/blob/main/MODEL_ZOO.md
+MODEL_NAME = 'facebook/mask2former-swin-small-coco-instance'
+model = Mask2FormerForUniversalSegmentation.from_pretrained(MODEL_NAME)
+# Image Processor
+image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
+
+from PIL import Image
+import requests
+
+url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+image = Image.open(requests.get(url, stream=True).raw)
+inputs = image_processor(image, return_tensors="pt")
+with torch.no_grad():
+    outputs = model(**inputs)
+    print(outputs.keys())
 
 model = mask_rcnn.maskrcnn_resnet50_fpn(weights=mask_rcnn.MaskRCNN_ResNet50_FPN_Weights.COCO_V1)
 # Freeze the parameters
@@ -333,4 +350,4 @@ from torch_extend.display.detection import show_average_precisions
 
 show_average_precisions(last_preds, last_targets, idx_to_class)
 
-# %%
+#%%

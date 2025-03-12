@@ -169,9 +169,7 @@ elif LR_SCHEDULER == "reducelronplateau":
 ###### 6. Training and Validation loop ######
 import time
 from tqdm import tqdm
-import numpy as np
-
-from torch_extend.metrics.detection import average_precisions
+from torchmetrics.detection import MeanAveragePrecision
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
@@ -215,15 +213,16 @@ def validation_step(batch, batch_idx, device, model, criterion,
 
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
-    # Calculate the mean Average Precision
-    aps = average_precisions(preds, targets,
-                             idx_to_class, 
-                             iou_threshold=AP_IOU_THRESHOLD)
-    mean_average_precision = np.mean([v['average_precision'] for v in aps.values()])
-    global last_aps
-    last_aps = aps
-    print(f'mAP@{int(AP_IOU_THRESHOLD*100)}={mean_average_precision}')
-    return {f'mAP@{int(AP_IOU_THRESHOLD*100)}': mean_average_precision}
+    # Calculate the Mean Average Precision
+    map_metric = MeanAveragePrecision(iou_type=["bbox"], class_metrics=True, extended_summary=True)
+    map_metric.update(preds, targets)
+    map_score = map_metric.compute()
+    global last_preds
+    global last_targets
+    last_preds = preds
+    last_targets = targets
+    print(f'BoxAP@50-95={map_score["map"].item()}, BoxAP@50={map_score["map_50"].item()}, BoxAP@75={map_score["map_75"].item()}')
+    return {'BoxAP@50-95': map_score["map"].item(), 'BoxAP@50': map_score["map_50"].item(), 'BoxAP@75': map_score["map_75"].item()}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -334,6 +333,6 @@ show_predicted_bboxes(imgs, preds, targets, idx_to_class)
 # Plot Average Precisions
 from torch_extend.display.detection import show_average_precisions
 
-show_average_precisions(last_aps)
+show_average_precisions(last_preds, last_targets, idx_to_class)
 
 #%%

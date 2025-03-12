@@ -171,8 +171,10 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
         boxes = pred['boxes'].cpu().detach()
         labels = pred['labels'].cpu().detach().numpy()
         scores = pred['scores'].cpu().detach().numpy()
-        masks = pred['masks'].cpu().detach().squeeze(1)
-        masks = torch.round(masks).to(torch.uint8)  # float32(N, 1, H, W) -> uint8(N, H, W)
+        masks = pred['masks'].cpu().detach()
+        # Mask float32(N, 1, H, W) -> uint8(N, H, W)
+        if masks.dtype == torch.float32:
+            masks = torch.round(masks.squeeze(1)).to(torch.uint8)
         # Change the label to -1 if the predicted label is not in idx_to_class
         labels = np.where(np.isin(labels, list(idx_to_class.keys())), labels, -1)
         idx_to_class_uk = {k: v for k, v in idx_to_class.items()}
