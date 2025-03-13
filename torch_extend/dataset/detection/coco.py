@@ -5,7 +5,7 @@ import albumentations as A
 import numpy as np
 import os
 
-from ...data_converter.detection import convert_bbox_xywh_to_xyxy
+from ...data_converter.detection import _convert_bbox_xywh_to_xyxy
 from .utils import DetectionOutput
 
 class CocoDetectionTV(CocoDetection, DetectionOutput):
@@ -59,7 +59,7 @@ class CocoDetectionTV(CocoDetection, DetectionOutput):
         # Get the labels
         labels = torch.tensor(labels, dtype=torch.int64)
         # Convert the bounding boxes
-        boxes = [[int(k) for k in convert_bbox_xywh_to_xyxy(*box)]
+        boxes = [[int(k) for k in _convert_bbox_xywh_to_xyxy(*box)]
                   for box in boxes]
         boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Get the image path

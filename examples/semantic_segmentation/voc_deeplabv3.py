@@ -88,6 +88,7 @@ val_dataset = VOCSemanticSegmentation(DATA_ROOT, image_set='val',
                                       transforms=eval_transform)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
+num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 # Border and Background index
@@ -132,7 +133,6 @@ model = deeplabv3.deeplabv3_resnet50(weights=deeplabv3.DeepLabV3_ResNet50_Weight
 for name, param in model.named_parameters():
     param.requires_grad = False
 # Replace layers for transfer learning
-num_classes = max(class_to_idx.values()) + 1
 model.aux_classifier = fcn.FCNHead(1024, num_classes)
 model.classifier = deeplabv3.DeepLabHead(2048, num_classes)
 

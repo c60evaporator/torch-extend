@@ -76,16 +76,17 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import VOCDetectionTV
+from torch_extend.dataset import VOCDetection
 from torch_extend.display.detection import show_bounding_boxes
 
 # Dataset
-train_dataset = VOCDetectionTV(DATA_ROOT, image_set='train', download=True,
+train_dataset = VOCDetection(DATA_ROOT, image_set='train', download=True,
                                transforms=train_transform)
-val_dataset = VOCDetectionTV(DATA_ROOT, image_set='val',
+val_dataset = VOCDetection(DATA_ROOT, image_set='val',
                              transforms=eval_transform)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
+num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 
@@ -102,12 +103,6 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
-    # Denormalize the image
-    # denormalize_image = v2.Compose([
-    #     v2.Normalize(mean=[-mean/std for mean, std in zip(IMAGENET_MEAN, IMAGENET_STD)],
-    #                 std=[1/std for std in IMAGENET_STD])
-    # ])
-    # img = denormalize_image(img)
     # Show the image
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
     boxes, labels = target['boxes'], target['labels']
@@ -129,7 +124,6 @@ model = faster_rcnn.fasterrcnn_resnet50_fpn(weights=faster_rcnn.FasterRCNN_ResNe
 for name, param in model.named_parameters():
     param.requires_grad = False
 # Replace layers for transfer learning
-num_classes = max(class_to_idx.values()) + 1
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
 

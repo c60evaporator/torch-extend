@@ -1,8 +1,8 @@
 from typing import Dict, Literal, List
 import torch
-from torchvision.utils import draw_bounding_boxes
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import seaborn as sns
 import copy
 import math
 import numpy as np
@@ -12,7 +12,7 @@ from ..metrics import detection as det
 
 def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
                         colors=None, fill=False, width=1,
-                        font=None, font_size=None,
+                        font_size=10,
                         anomaly_indices=None,
                         ax=None):
     """
@@ -35,11 +35,7 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
     fill : bool
         If `True` fills the bounding box with specified color.
     width : int
-        Width of bounding box.
-    font : str
-        A filename containing a TrueType font. If the file is not found in this filename, the loader may
-        also search in other directories, such as the `fonts/` directory on Windows or `/Library/Fonts/`,
-        `/System/Library/Fonts/` and `~/Library/Fonts/` on macOS.
+        Width of the line of the bounding boxes.
     font_size : int
         The requested font size in points.
     anomaly_indices : int
@@ -52,18 +48,34 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
         ax=plt.gca()
     # Convert class IDs to class names
     if idx_to_class is not None:
-        labels = [idx_to_class[int(label.item())] for label in labels]
-    # Show All bounding boxes
-    image_with_boxes = draw_bounding_boxes(image, boxes, labels=labels, colors=colors,
-                                           fill=fill, width=width,
-                                           font=font, font_size=font_size)
-    image_with_boxes = image_with_boxes.permute(1, 2, 0)  # Change axis order from (ch, x, y) to (x, y, ch)
-    ax.imshow(image_with_boxes)
+        label_names = [idx_to_class[int(label.item())] for label in labels]
+    else:
+        label_names = [str(label.item()) for label in labels]
+    # Show the image
+    ax.imshow(image.permute(1, 2, 0))
+    # Create the pallette for the colors
+    if colors is None:
+        colors = sns.color_palette(n_colors=256).as_hex()
+    # Show bounding boxes
+    for box, label, label_name in zip(boxes, labels, label_names):
+        
+        r = patches.Rectangle(xy=(box[0], box[1]), 
+                              width=box[2]-box[0], 
+                              height=box[3]-box[1], 
+                              ec=colors[label], fill=fill,
+                              lw=width)
+        ax.add_patch(r)
+        ax.text(box[0], box[1]-width, label_name, color=colors[label], fontsize=font_size)
+    # image_with_boxes = draw_bounding_boxes(image, boxes, labels=label_names, colors=colors,
+    #                                        fill=fill, width=width,
+    #                                        font=font, font_size=100)
+    # image_with_boxes = image_with_boxes.permute(1, 2, 0)  # Change axis order from (ch, x, y) to (x, y, ch)
+    # ax.imshow(image_with_boxes)
     # Draw Anomaly boxes
     if anomaly_indices is not None:
         for idx in anomaly_indices:
             ax.plot(boxes[idx][0], boxes[idx][1], marker='X', markersize=6, color = 'red') #　Anomaly topleft
-            plt.text(boxes[idx][0], boxes[idx][1], labels[idx], color='red', fontsize=8)
+            plt.text(boxes[idx][0], boxes[idx][1]-width, labels[idx], color='red', fontsize=8)
             ax.plot(boxes[idx][2], boxes[idx][3], marker='X', markersize=6, color = 'red') #　Anomaly bottomright
 
 def _show_pred_true_boxes(image, 

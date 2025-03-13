@@ -91,6 +91,7 @@ val_dataset = CocoDetectionTV(
 )
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
+num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 na_cnt = 0
@@ -133,7 +134,6 @@ model = faster_rcnn.fasterrcnn_resnet50_fpn(weights=faster_rcnn.FasterRCNN_ResNe
 for name, param in model.named_parameters():
     param.requires_grad = False
 # Replace layers for transfer learning
-num_classes = max(class_to_idx.values()) + 1
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
 

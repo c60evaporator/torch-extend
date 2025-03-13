@@ -7,7 +7,7 @@ from PIL import Image
 import os
 
 from .utils import DetectionOutput
-from ...data_converter.detection import convert_bbox_centerxywh_to_xyxy
+from ...data_converter.detection import _convert_bbox_centerxywh_to_xyxy
 
 class YoloDetection(VisionDataset, DetectionOutput):
     """
@@ -63,7 +63,7 @@ class YoloDetection(VisionDataset, DetectionOutput):
     #         # Get the bounding boxes
     #         rect_list = [line.split(' ')[1:] for line in lines]
     #         rect_list = [[float(cell.replace('\n','')) for cell in rect] for rect in rect_list]
-    #         boxes = [convert_bbox_centerxywh_to_xyxy(*rect) for rect in rect_list]  # Convert [x_c, y_c, w, h] to [xmin, ymin, xmax, ymax]
+    #         boxes = [_convert_bbox_centerxywh_to_xyxy(*rect) for rect in rect_list]  # Convert [x_c, y_c, w, h] to [xmin, ymin, xmax, ymax]
     #         boxes = torch.tensor(boxes) * torch.tensor([w, h, w, h], dtype=float)  # Convert normalized coordinates to raw coordinates
     #     target = {'boxes': boxes, 'labels': labels, 'image_path': self.images[index]}
     #     return target
@@ -90,7 +90,7 @@ class YoloDetection(VisionDataset, DetectionOutput):
         # Get the labels
         labels = torch.tensor(labels, dtype=torch.int64)
         # Convert the bounding boxes from [x_c, y_c, w, h] to [xmin, ymin, xmax, ymax]
-        boxes = [[int(k) for k in convert_bbox_centerxywh_to_xyxy(*box)]
+        boxes = [[int(k) for k in _convert_bbox_centerxywh_to_xyxy(*box)]
                   for box in boxes]
         # Convert normalized coordinates to raw coordinates
         boxes = torch.tensor(boxes) * torch.tensor([w, h, w, h], dtype=torch.float32) if len(boxes) > 0 \

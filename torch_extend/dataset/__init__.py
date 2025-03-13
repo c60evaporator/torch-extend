@@ -1,5 +1,5 @@
 from .classification.cifar import CIFAR10TV
-from .detection.voc import VOCDetectionTV
+from .detection.voc import VOCDetection
 from .detection.coco import CocoDetectionTV
 from .detection.yolo import YoloDetection
 from .semantic_segmentation.voc import VOCSemanticSegmentation
@@ -8,7 +8,7 @@ from .instance_segmentation.voc import VOCInstanceSegmentation
 
 __all__ = [
     "CIFAR10TV",
-    "VOCDetectionTV",
+    "VOCDetection",
     "CocoDetectionTV",
     "YoloDetection",
     "VOCSemanticSegmentation",

@@ -8,10 +8,10 @@ from transformers import BaseImageProcessor
 
 import xml.etree.ElementTree as ET
 
-from ..detection.voc import VOCBaseTV, parse_voc_xml
+from ..detection.voc import VOCDetection
 from ..detection.utils import DetectionOutput
 
-class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
+class VOCInstanceSegmentation(VOCDetection):
     """`Pascal VOC <http://host.robots.ox.ac.uk/pascal/VOC/>`_ Instance Segmentation Dataset.
 
     Parameters
@@ -22,20 +22,20 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
         A dict which indicates the conversion from the label indices to the label names
     output_format : Literal["torchvision", "transformers"]
         The output format of the image and target, either ``"torchvision"`` or ``"transformers"``.
-    border_idx : int
-        The index of the border in the target mask.
     image_set : str
         Select the image_set to use, ``"train"``, ``"trainval"`` or ``"val"``.
     download : bool, optional
         If true, downloads VOC2012 dataset from the internet and puts it in root directory.
     transform : callable, optional
-        A function/transform that  takes in an PIL image and returns a transformed version. E.g, ``transforms.PILToTensor``. Not available if ``output_format="transformers"``.
+        A function/transform that  takes in an PIL image and returns a transformed version. E.g, ``transforms.PILToTensor``.
     target_transform : callable, optional
-        A function/transform that takes in the target and transforms it. Not available if ``output_format="transformers"``.
+        A function/transform that takes in the target and transforms it.
     transforms : callable, optional
-        A function/transform that takes input sample and its target as entry and returns a transformed version. Not available if ``output_format="transformers"``.
+        A function/transform that takes input sample and its target as entry and returns a transformed version.
     processor : callable, optional
         An image processor instance for HuggingFace Transformers. Only available if ``output_format="transformers"``. 
+    border_idx : int
+        The index of the border in the target mask.
     """
 
     def __init__(
@@ -43,32 +43,17 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
         root: str,
         idx_to_class: Dict[int, str] = None,
         output_format: Literal["torchvision", "transformers"] = "torchvision",
-        border_idx: int = 255,
         image_set: str = "train",
         download: bool = False,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
         transforms: Optional[Callable] = None,
         processor: Optional[BaseImageProcessor] = None,
+        border_idx: int = 255
     ):
-        super().__init__(root, image_set, download, transform, target_transform, transforms)
-        if idx_to_class is None:
-            self.idx_to_class = self.IDX_TO_CLASS
-        else:
-            self.idx_to_class = idx_to_class
-        self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
-        self.ids = os.listdir(root)
+        super().__init__(root, idx_to_class, output_format, image_set, download,
+                         transform, target_transform, transforms, processor)
         self.border_idx = border_idx
-        if output_format == "transformers":
-            self.transform = None
-            self.target_transform = None
-            self.transforms = None
-            if processor is None:
-                raise ValueError("`processor` must be provided if `output_format` is 'transformers'")
-            else:
-                self.processor = processor
-        else:
-            self.processor = None
 
     def __len__(self) -> int:
         return len(self.images_instance)
@@ -78,9 +63,8 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
     
     def _load_target(self, index: int) -> List[Any]:
         """Load the target masks and bboxes of the dataset"""
-        # Read XML file 
-        target = parse_voc_xml(ET.parse(self.bboxes_instance[index]).getroot())
-        objects = target['annotation']['object']
+        # Read bounding box XML file 
+        objects = self._load_voc_bboxes(self.bboxes_instance[index])
         # Get the labels
         labels = [self.class_to_idx[obj['name']] for obj in objects]
         # Get the bounding boxes
@@ -123,7 +107,7 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
                   'area': area,
                   'iscrowd': iscrowd,
                   'border_mask': border_mask,
-                  'image_path': self.images_detection[index]}
+                  'image_path': self.images_instance[index]}
         return target
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
@@ -135,15 +119,16 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
             print('Warning: Empty masks found, creating dummy masks')
             masks = [np.zeros((h, w), dtype=np.uint8)]
 
+        # Apply transforms
         if self.transforms is not None:
             # Albumentation transforms
             if isinstance(self.transforms, A.Compose):
                 transformed = self.transforms(image=np.array(image), bboxes=boxes, class_labels=labels, masks=masks)
                 image = transformed['image']
                 target = self._convert_target(transformed['bboxes'], 
-                                              transformed['class_labels'],
-                                              transformed['masks'],
-                                              border_mask, index, w, h)
+                                            transformed['class_labels'],
+                                            transformed['masks'],
+                                            border_mask, index, w, h)
             # TorchVision transforms
             else:
                 converted_target = self._convert_target(boxes, labels, masks, border_mask, index, w, h)
@@ -151,8 +136,14 @@ class VOCInstanceSegmentation(VOCBaseTV, DetectionOutput):
         # No transformation
         else:
             target = self._convert_target(boxes, labels, masks, border_mask, index, w, h)
+        
+        # Output as TorchVision format
+        if self.output_format == "torchvision":
+            return image, target
 
-        return image, target
+        # Output as Transformers format
+        elif self.output_format == "transformers":
+            return self._convert_to_transformers(index, image, target)
     
     def get_image_target_path(self, index: int):
         """Get the image and target path of the dataset."""

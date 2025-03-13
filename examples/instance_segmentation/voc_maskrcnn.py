@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
 
 # General Parameters
-EPOCHS = 4
+EPOCHS = 1
 BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
 DATA_ROOT = '../detection/datasets/VOC2012'
@@ -68,7 +68,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import 
+from torch_extend.dataset import VOCInstanceSegmentation
 from torch_extend.display.instance_segmentation import show_instance_masks
 
 # Dataset
@@ -78,6 +78,7 @@ val_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='val',
                                       transforms=eval_transform)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
+num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 
@@ -123,7 +124,6 @@ model = mask_rcnn.maskrcnn_resnet50_fpn(weights=mask_rcnn.MaskRCNN_ResNet50_FPN_
 for name, param in model.named_parameters():
     param.requires_grad = False
 # Replace layers for transfer learning (https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#object-detection-and-instance-segmentation-model-for-pennfudan-dataset)
-num_classes = max(class_to_idx.values()) + 1
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
 in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels

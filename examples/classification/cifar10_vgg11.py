@@ -99,6 +99,7 @@ val_dataset = CIFAR10TV(
 )
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
+num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in train_dataset.class_to_idx.items()}
 
@@ -144,7 +145,6 @@ model = models.vgg11(weights=models.VGG11_Weights.IMAGENET1K_V1, dropout=DROPOUT
 for name, param in model.named_parameters():
     param.requires_grad = False
 # Replace layers for transfer learning
-num_classes = max(class_to_idx.values()) + 1
 model.classifier = nn.Sequential(
     nn.Linear(512 * 7 * 7, 4096),
     nn.ReLU(True),

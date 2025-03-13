@@ -99,6 +99,7 @@ val_dataset = CIFAR10TV(
 )
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
+num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in train_dataset.class_to_idx.items()}
 
@@ -140,7 +141,7 @@ from torch import nn
 
 class LeNet(nn.Module):
     """LeNet model for CIFAR-10 (https://www.kaggle.com/code/vikasbhadoria/cifar10-high-accuracy-model-build-on-pytorch)"""
-    def __init__(self, dropout=0.5):
+    def __init__(self, dropout=0.5, num_classes=10):
         super().__init__()
         self.fetrures = nn.Sequential(
             nn.Conv2d(3, 16, 3, 1, padding=1),
@@ -157,7 +158,7 @@ class LeNet(nn.Module):
             nn.Linear(4*4*64, 500),
             nn.ReLU(inplace=False),
             nn.Dropout(dropout),
-            nn.Linear(500, 10)
+            nn.Linear(500, num_classes)
         )
     def forward(self, x):
       x = self.fetrures(x)
@@ -165,7 +166,7 @@ class LeNet(nn.Module):
       x = self.classifier(x)
       return x
 
-model = LeNet(dropout=DROPOUT)
+model = LeNet(dropout=DROPOUT, num_classes=num_classes)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######

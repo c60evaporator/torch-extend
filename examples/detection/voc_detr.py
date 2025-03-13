@@ -12,7 +12,7 @@ sys.path.append(ROOT)
 EPOCHS = 4
 BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
-DATA_ROOT = '../detection/datasets/VOC2012'
+DATA_ROOT = './datasets/VOC2012'
 # Optimizer Parameters
 OPT_NAME = 'sgd'
 LR = 0.005
@@ -29,9 +29,7 @@ LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
-# Specify the model name from the Hugging Face Model Hub (https://huggingface.co/models?sort=downloads&search=mask2former)
-# Reference https://github.com/facebookresearch/Mask2Former/blob/main/MODEL_ZOO.md
-MODEL_NAME = 'facebook/mask2former-swin-small-coco-instance'  
+MODEL_NAME = 'facebook/detr-resnet-50'
 
 # Select the device
 DEVICE = 'cuda'
@@ -44,13 +42,13 @@ else:
 # Set the random seed
 torch.manual_seed(42)
 
-# %% Define the preprocessing
-###### 2. Define the preprocessing ######
-from transformers import AutoImageProcessor, Mask2FormerImageProcessor
+# %% Define the transforms
+###### 2. Define the transforms ######
+from transformers import AutoImageProcessor, DetrImageProcessor
 import albumentations as A
 
 # Image Processor (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
-image_processor: Mask2FormerImageProcessor = AutoImageProcessor.from_pretrained(MODEL_NAME)
+image_processor = DetrImageProcessor.from_pretrained(MODEL_NAME)
 
 # Augmentation (Resize, Normalize, and ToTensor are not needed because the image_processor does it)
 # Transforms for training
@@ -66,23 +64,35 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import VOCInstanceSegmentation
-from torch_extend.display.instance_segmentation import show_instance_masks
+from torch_extend.dataset import VOCDetection
+from torch_extend.display.detection import show_bounding_boxes
+from torch_extend.data_converter.detection import convert_batch_to_torchvision
 
 # Dataset
-train_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='train', download=True,
-                                        transforms=train_transform)
-val_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='val',
-                                      transforms=eval_transform)
+train_dataset = VOCDetection(DATA_ROOT, image_set='train', download=True,
+                             transforms=train_transform,
+                             output_format='transformers', processor=image_processor)
+val_dataset = VOCDetection(DATA_ROOT, image_set='val',
+                           transforms=eval_transform,
+                           output_format='transformers', processor=image_processor)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
 num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 
-# Dataloader
+# Collate function for the DataLoader (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
 def collate_fn(batch):
-    return tuple(zip(*batch))
+    pixel_values = [item[0] for item in batch]
+    encoding = image_processor.pad(pixel_values, return_tensors="pt")
+    labels = [item[1] for item in batch]
+    batch = {}
+    batch['pixel_values'] = encoding['pixel_values']
+    batch['pixel_mask'] = encoding['pixel_mask']
+    batch['labels'] = labels
+    return batch
+
+# Dataloader
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
                               shuffle=True, num_workers=NUM_WORKERS,
                               collate_fn=collate_fn)
@@ -93,56 +103,35 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
-    # Denormalize the image
-    # denormalize_image = v2.Compose([
-    #     v2.Normalize(mean=[-mean/std for mean, std in zip(IMAGENET_MEAN, IMAGENET_STD)],
-    #                 std=[1/std for std in IMAGENET_STD])
-    # ])
-    # img = denormalize_image(img)
     # Show the image
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
-    boxes, labels, masks = target['boxes'], target['labels'], target['masks']
-    show_instance_masks(img, masks=masks, boxes=boxes,
-                        border_mask=target['border_mask'] if 'border_mask' in target else None,
-                        labels=labels,
+    boxes, labels = target['boxes'], target['labels']
+    show_bounding_boxes(img, boxes, labels=labels,
                         idx_to_class=idx_to_class, ax=ax)
 
 train_iter = iter(train_dataloader)
-imgs, targets = next(train_iter)
+batch = next(train_iter)
+imgs, targets = convert_batch_to_torchvision(batch, in_fmt='transformers')
 for i, (img, target) in enumerate(zip(imgs, targets)):
+    # Denormalize the image
+    if image_processor.do_normalize:
+        denormalize_image = v2.Compose([
+            v2.Normalize(mean=[-mean/std for mean, std in zip(image_processor.image_mean, image_processor.image_std)],
+                        std=[1/std for std in image_processor.image_std])
+        ])
+        img = denormalize_image(img)
+    # Show the image and target
     show_image_and_target(img, target)
     plt.show()
 
 # %% Define the model
 ###### 4. Define the model ######
-from transformers import Mask2FormerForUniversalSegmentation, AutoImageProcessor
-from transformers import AutoModelForUniversalSegmentation, Mask2FormerImageProcessor
+from transformers import DetrConfig, DetrForObjectDetection
 
-# Load the model
-model = Mask2FormerForUniversalSegmentation.from_pretrained(MODEL_NAME)
-image_processor: Mask2FormerImageProcessor = AutoImageProcessor.from_pretrained(MODEL_NAME)
-
-from PIL import Image
-import requests
-
-url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-image = Image.open(requests.get(url, stream=True).raw)
-inputs = image_processor(image, return_tensors="pt")
-with torch.no_grad():
-    outputs = model(**inputs)
-    print(outputs.keys())
-
-model = mask_rcnn.maskrcnn_resnet50_fpn(weights=mask_rcnn.MaskRCNN_ResNet50_FPN_Weights.COCO_V1)
-# Freeze the parameters
-for name, param in model.named_parameters():
-    param.requires_grad = False
-# Replace layers for transfer learning (https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#object-detection-and-instance-segmentation-model-for-pennfudan-dataset)
-num_classes = max(class_to_idx.values()) + 1
-in_features = model.roi_heads.box_predictor.cls_score.in_features
-model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
-in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
-hidden_layer = 256
-model.roi_heads.mask_predictor = mask_rcnn.MaskRCNNPredictor(in_features_mask, hidden_layer, num_classes)
+# DETR with randomly initialized weights for Transformer and pre-trained weights for backbone
+# (https://huggingface.co/docs/transformers/model_doc/detr#usage-tips)
+config = DetrConfig(use_pretrained_backbone=True, backbone='resnet50', id2label=idx_to_class, label2id=class_to_idx)
+model = DetrForObjectDetection(config)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
@@ -185,7 +174,7 @@ from torchmetrics.detection import MeanAveragePrecision
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
     inputs = [img.to(device) for img in batch[0]]
-    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items() if k in ['boxes', 'labels', 'masks']}
+    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
                 for t in batch[1]]
     loss_dict = model(inputs, targets)
     return criterion(loss_dict)
@@ -202,10 +191,7 @@ def val_predict(batch, device, model):
 
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
-    # Mask float32(N, 1, H, W) -> uint8(N, H, W)
-    return [{k: torch.round(v.squeeze(1)).to(torch.uint8).cpu()
-             if k == 'masks' else v.cpu()
-             for k, v in pred.items()} 
+    return [{k: v.cpu() for k, v in pred.items()} 
             for pred in preds]
 
 def get_targets_cpu(targets):
@@ -228,15 +214,15 @@ def validation_step(batch, batch_idx, device, model, criterion,
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Calculate the Mean Average Precision
-    map_metric = MeanAveragePrecision(iou_type=["bbox", "segm"], class_metrics=True, extended_summary=True)
+    map_metric = MeanAveragePrecision(iou_type=["bbox"], class_metrics=True, extended_summary=True)
     map_metric.update(preds, targets)
     map_score = map_metric.compute()
     global last_preds
     global last_targets
     last_preds = preds
     last_targets = targets
-    print(f'MaskAP@50-95={map_score["segm_map"].item()}, MaskAP@50={map_score["segm_map_50"].item()}, BoxAP@50-95={map_score["bbox_map"].item()}, BoxAP@50={map_score["bbox_map_50"].item()}')
-    return {'MaskAP@50-95': map_score["segm_map"].item(), 'MaskAP@50': map_score["segm_map_50"].item(), 'BoxAP@50-95': map_score["bbox_map"].item(), 'BoxAP@50': map_score["bbox_map_50"].item()}
+    print(f'BoxAP@50-95={map_score["map"].item()}, BoxAP@50={map_score["map_50"].item()}, BoxAP@75={map_score["map_75"].item()}')
+    return {'BoxAP@50-95': map_score["map"].item(), 'BoxAP@50': map_score["map_50"].item(), 'BoxAP@75': map_score["map_75"].item()}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -273,6 +259,9 @@ def val_one_epoch(loader, device, model,
                                    val_batch_preds, val_batch_targets)
             if loss is not None:
                 val_step_losses.append(loss.detach().item())  # Record the loss
+            # Plot the predicted bounding boxes
+            # if batch_idx == 0:
+            #     show_predicted_bboxes(batch[0], val_batch_preds, val_batch_targets, idx_to_class)
     torch.set_grad_enabled(True)
     model.train()
     # Calculate the metrics
@@ -332,17 +321,16 @@ fig.tight_layout()
 plt.show()
 
 #%% Plot predicted bounding boxes in the first minibatch of the validation dataset
-from torch_extend.display.instance_segmentation import show_predicted_instances
+from torch_extend.display.detection import show_predicted_bboxes
 
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
 preds, targets = val_predict((imgs, targets), device, model)
-show_predicted_instances(imgs, preds, targets, idx_to_class,
-                         border_mask=targets['border_mask'] if 'border_mask' in targets else None)
+show_predicted_bboxes(imgs, preds, targets, idx_to_class)
 
-#%% Plot Box Average Precisions
-# Plot Box Average Precisions
+#%% Plot Average Precisions
+# Plot Average Precisions
 from torch_extend.display.detection import show_average_precisions
 
 show_average_precisions(last_preds, last_targets, idx_to_class)

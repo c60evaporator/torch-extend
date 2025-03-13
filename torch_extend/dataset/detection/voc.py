@@ -1,13 +1,15 @@
+from typing import Any, Callable, List, Dict, Optional, Tuple, Literal
 import torch
 from torchvision.datasets import VisionDataset
 from torchvision.datasets.utils import download_and_extract_archive
 from torchvision.datasets.voc import DATASET_YEAR_DICT
+from torchvision.ops import box_convert
 import albumentations as A
 import numpy as np
-from typing import Any, Callable, List, Dict, Optional, Tuple
 from PIL import Image
 import collections
 import os
+from transformers import BaseImageProcessor
 import shutil
 
 from xml.etree.ElementTree import Element as ET_Element
@@ -40,7 +42,6 @@ def parse_voc_xml(node: ET_Element) -> Dict[str, Any]:
 
 class VOCBaseTV(VisionDataset):
     IDX_TO_CLASS = {
-        0: 'background',
         1: 'aeroplane',
         2: 'bicycle',
         3: 'bird',
@@ -131,7 +132,7 @@ class VOCBaseTV(VisionDataset):
             self.images_instance, self.masks_instance, self.bboxes_instance = self._get_images_targets(
                 root, image_set, "Segmentation", "SegmentationObject", ".png", aux_target_dir_name="Annotations")
 
-class VOCDetectionTV(VOCBaseTV, DetectionOutput):
+class VOCDetection(VOCBaseTV, DetectionOutput):
     """
     Dataset from Pascal VOC format to Torchvision format with image path
 
@@ -141,27 +142,33 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
         Root directory of the VOC Dataset.
     idx_to_class : Dict[int, str]
         A dict which indicates the conversion from the label indices to the label names
+    out_fmt : Literal["torchvision", "transformers"]
+        The output format of the image and target, either ``"torchvision"`` or ``"transformers"``.
     image_set : str
         Select the image_set to use, ``"train"``, ``"trainval"`` or ``"val"``.
     download : bool, optional
         If true, downloads VOC2012 dataset from the internet and puts it in root directory.
     transform : callable, optional
-        A function/transform that  takes in an PIL image and returns a transformed version. E.g, ``transforms.PILToTensor``
+        A function/transform that  takes in an PIL image and returns a transformed version. E.g, ``transforms.PILToTensor``.
     target_transform : callable, optional
         A function/transform that takes in the target and transforms it.
     transforms : callable, optional
         A function/transform that takes input sample and its target as entry and returns a transformed version.
+    processor : callable, optional
+        An image processor instance for HuggingFace Transformers. Only available if ``output_format="transformers"``. 
     """
 
     def __init__(
         self, 
         root: str,
         idx_to_class : Dict[int, str] = None,
+        output_format: Literal["torchvision", "transformers"] = "torchvision",
         image_set: str = "train",
         download: bool = False,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
-        transforms: Optional[Callable] = None
+        transforms: Optional[Callable] = None,
+        processor: Optional[BaseImageProcessor] = None
     ):
         super().__init__(root, image_set, download, transform, target_transform, transforms)
         if idx_to_class is None:
@@ -170,6 +177,17 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
             self.idx_to_class = idx_to_class
         self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         self.ids = os.listdir(root)
+        self.output_format = output_format
+        if output_format == "transformers":
+            self.transform = None
+            self.target_transform = None
+            self.transforms = None
+            if processor is None:
+                raise ValueError("`processor` must be provided if `output_format` is 'transformers'")
+            else:
+                self.processor = processor
+        else:
+            self.processor = None
 
     def __len__(self) -> int:
         return len(self.images_detection)
@@ -177,10 +195,14 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
     def _load_image(self, index: int) -> Image.Image:
         return Image.open(self.images_detection[index]).convert("RGB")
     
+    def _load_voc_bboxes(self, bbox_xml: str) -> Dict[str, Any]:
+        # Read bounding box XML file 
+        target = parse_voc_xml(ET_parse(bbox_xml).getroot())
+        return target['annotation']['object']
+    
     def _load_target(self, index: int) -> List[Any]:
         # Read XML file 
-        target = parse_voc_xml(ET_parse(self.bboxes_detection[index]).getroot())
-        objects = target['annotation']['object']
+        objects = self._load_voc_bboxes(self.bboxes_detection[index])
         # Get the labels
         labels = [self.class_to_idx[obj['name']] for obj in objects]
         # Get the bounding boxes
@@ -194,14 +216,37 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
         labels = torch.tensor(labels, dtype=torch.int64)
         # Convert the bounding boxes
         boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
-        # Get the image path
-        target = {'boxes': boxes, 'labels': labels, 'image_path': self.images_detection[index]}
+        # Output as Torchvision format
+        target = {'boxes': boxes,
+                  'labels': labels,
+                  'image_path': self.images_detection[index]}
         return target
+    
+    def _convert_target_to_transformers(self, image, image_id, target):
+        """Convert VOC to Transformers format (Reference: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/DETR/Fine_tuning_DetrForObjectDetection_on_custom_dataset_(balloon).ipynb)"""
+        # format annotations in COCO format
+        annotations = [
+            {
+                "image_id": image_id,
+                "category_id": label.item(),
+                "bbox": box_convert(box, "xyxy", "xywh").tolist(),
+                "iscrowd": 0,
+                "area": (box[2].item() - box[0].item()) * (box[3].item() - box[1].item()),
+            }
+            for box, label in zip(target['boxes'], target['labels'])
+        ]
+        encoding = self.processor(images=image, 
+                                  annotations={'image_id': image_id, 'annotations': annotations},
+                                  return_tensors="pt")
+        pixel_values = encoding["pixel_values"].squeeze() # remove batch dimension
+        target = encoding["labels"][0] # remove batch dimension
+        return pixel_values, target
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         image = self._load_image(index)
         boxes, labels = self._load_target(index)
 
+        # Apply transforms
         if self.transforms is not None:
             # Albumentation transforms
             if isinstance(self.transforms, A.Compose):
@@ -217,4 +262,10 @@ class VOCDetectionTV(VOCBaseTV, DetectionOutput):
         else:
             target = self._convert_target(boxes, labels, index)
 
-        return image, target
+        # Output as TorchVision format
+        if self.output_format == "torchvision":
+            return image, target
+
+        # Output as Transformers format
+        elif self.output_format == "transformers":
+            return self._convert_target_to_transformers(image, index, target)

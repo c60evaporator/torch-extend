@@ -3,7 +3,7 @@ import os
 import shutil
 import json
 
-from ...data_converter.detection import target_transform_from_torchvision
+from ...data_converter.detection import convert_target
 
 class DetectionOutput():
     def _get_images_targets(self):
@@ -20,7 +20,7 @@ class DetectionOutput():
         images, targets = self._get_images_targets()
         # Convert the target to COCO format
         targets = [
-            target_transform_from_torchvision(target, out_format='coco')
+            convert_target(target, in_fmt='torchvision', out_fmt='coco')
             for target in targets
         ]
         # Create "images" field in the annotation file
