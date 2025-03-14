@@ -209,6 +209,14 @@ def val_predict(batch, device, model):
                        for pred in preds])
     return preds, batch[1]
 
+def calc_val_loss(preds, targets, criterion):
+    """Calculate the validation loss from the batch"""
+    return None
+
+def convert_preds_targets_to_torchvision(preds, targets):
+    """Convert the predictions and targets to TorchVision format"""
+    return preds, targets
+
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
     if isinstance(preds, torch.Tensor):
@@ -228,7 +236,9 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Predict the batch
     preds, targets = val_predict(batch, device, model)
     # Calculate the loss
-    loss = None
+    loss = calc_val_loss(preds, targets, criterion)
+    # Convert the predicitions and targets to TorchVision format
+    preds, targets = convert_preds_targets_to_torchvision(preds, targets)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))

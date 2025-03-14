@@ -9,14 +9,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
 
 # General Parameters
-EPOCHS = 4
+EPOCHS = 30
 BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
 DATA_ROOT = './datasets/VOC2012'
 # Optimizer Parameters
-OPT_NAME = 'sgd'
-LR = 0.005
-WEIGHT_DECAY = 0.0005
+OPT_NAME = 'adamw'
+LR = 2e-5
+WEIGHT_DECAY = 1e-4
 MOMENTUM = 0.9  # For SGD and RMSprop
 RMSPROP_ALPHA = 0.99  # For RMSprop
 EPS = 1e-8  # For RMSprop, Adam, and AdamW
@@ -28,6 +28,7 @@ LR_STEP_SIZE = 8  # For StepLR
 LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
+LR_BACKBONE = 5e-6  # Learning rate for the backbone
 # Model Parameters
 MODEL_NAME = 'facebook/detr-resnet-50'
 
@@ -64,7 +65,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import VOCDetection
+from torch_extend.dataset import VOCDetection, CocoDetectionTV
 from torch_extend.display.detection import show_bounding_boxes
 from torch_extend.data_converter.detection import convert_batch_to_torchvision
 
@@ -80,6 +81,36 @@ class_to_idx = train_dataset.class_to_idx
 num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
+
+
+
+# import torchvision
+# class CocoDetection(torchvision.datasets.CocoDetection):
+#     def __init__(self, img_folder, processor, train=True):
+#         ann_file = os.path.join(img_folder, "custom_train.json" if train else "custom_val.json")
+#         super(CocoDetection, self).__init__(img_folder, ann_file)
+#         self.processor = processor
+
+#     def __getitem__(self, idx):
+#         # read in PIL image and target in COCO format
+#         # feel free to add data augmentation here before passing them to the next step
+#         img, target = super(CocoDetection, self).__getitem__(idx)
+
+#         # preprocess image and target (converting target to DETR format, resizing + normalization of both image and target)
+#         image_id = self.ids[idx]
+#         target = {'image_id': image_id, 'annotations': target}
+#         encoding = self.processor(images=img, annotations=target, return_tensors="pt")
+#         pixel_values = encoding["pixel_values"].squeeze() # remove batch dimension
+#         target = encoding["labels"][0] # remove batch dimension
+
+#         return pixel_values, target
+
+# train_dataset = CocoDetection(img_folder='datasets/balloon/train', processor=image_processor)
+# val_dataset = CocoDetection(img_folder='datasets/balloon/val', processor=image_processor, train=False)
+# cats = train_dataset.coco.cats
+# idx_to_class = {k: v['name'] for k,v in cats.items()}
+
+
 
 # Collate function for the DataLoader (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
 def collate_fn(batch):
@@ -130,16 +161,23 @@ from transformers import DetrConfig, DetrForObjectDetection
 
 # DETR with randomly initialized weights for Transformer and pre-trained weights for backbone
 # (https://huggingface.co/docs/transformers/model_doc/detr#usage-tips)
-config = DetrConfig(use_pretrained_backbone=True, backbone='resnet50', id2label=idx_to_class, label2id=class_to_idx)
-model = DetrForObjectDetection(config)
+# config = DetrConfig(use_pretrained_backbone=True, backbone='resnet50', id2label=idx_to_class, label2id=class_to_idx)
+# model = DetrForObjectDetection(config)
+# ()
+model = DetrForObjectDetection.from_pretrained(MODEL_NAME,
+                                               revision="no_timm",
+                                               num_labels=len(idx_to_class),
+                                               ignore_mismatched_sizes=True)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
 # Criterion (Sum of all the losses)
-def criterion(loss_dict):
-    return sum(loss for loss in loss_dict.values())
+def criterion(outputs):
+    return outputs.loss
 # Optimizer (Reference https://github.com/pytorch/vision/blob/main/references/classification/train.py)
-parameters = [p for p in model.parameters() if p.requires_grad]
+parameters = [{"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
+              {"params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad],
+               "lr": LR_BACKBONE}]
 if OPT_NAME.startswith("sgd"):
     optimizer = torch.optim.SGD(parameters, lr=LR, momentum=MOMENTUM,
                                 weight_decay=WEIGHT_DECAY, nesterov="nesterov" in OPT_NAME,
@@ -170,14 +208,21 @@ elif LR_SCHEDULER == "reducelronplateau":
 import time
 from tqdm import tqdm
 from torchmetrics.detection import MeanAveragePrecision
+from torchvision.ops.boxes import box_convert
+import torchvision.transforms.v2.functional as F
+import matplotlib.pyplot as plt
+
+from torch_extend.metrics.detection import extract_cofident_boxes
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
-    inputs = [img.to(device) for img in batch[0]]
-    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
-                for t in batch[1]]
-    loss_dict = model(inputs, targets)
-    return criterion(loss_dict)
+    pixel_values = batch["pixel_values"].to(device)
+    pixel_mask = batch["pixel_mask"].to(device)
+    labels = [{k: v.to(device) for k, v in t.items()} for t in batch["labels"]]
+    outputs = model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels)
+    # for k,v in outputs.loss_dict.items():
+    #       self.log("train_" + k, v.item())
+    return criterion(outputs)
 
 def training_step(batch, batch_idx, device, model, criterion):
     """Training step per batch"""
@@ -187,7 +232,32 @@ def training_step(batch, batch_idx, device, model, criterion):
 def val_predict(batch, device, model):
     """Predict the validation batch"""
     # Predict the batch
-    return model([img.to(device) for img in batch[0]]), batch[1]
+    pixel_values = batch["pixel_values"].to(device)
+    pixel_mask = batch["pixel_mask"].to(device)
+    labels = [{k: v.to(device) for k, v in t.items()} for t in batch["labels"]]
+    preds = model(pixel_values=pixel_values, pixel_mask=pixel_mask)
+    return preds, labels
+
+def calc_val_loss(preds, targets, criterion):
+    """Calculate the validation loss from the batch"""
+    return criterion(preds)
+
+def convert_preds_targets_to_torchvision(preds, targets):
+    """Convert the predictions and targets to TorchVision format"""
+    # Post-process the predictions
+    orig_target_sizes = torch.stack([target["orig_size"] for target in targets], dim=0)
+    results = image_processor.post_process_object_detection(
+        preds, target_sizes=orig_target_sizes, threshold=0
+    )
+    # Convert the targets
+    targets = [{
+        "boxes": box_convert(target["boxes"], 'cxcywh', 'xyxy') \
+                 * torch.tensor([orig[1], orig[0], orig[1], orig[0]], dtype=torch.float32).to(DEVICE) if target["boxes"].shape[0] > 0 \
+                 else torch.zeros(size=(0, 4), dtype=torch.float32).to(DEVICE),
+        "labels": target["class_labels"]
+    } for target, orig in zip(targets, orig_target_sizes)]
+    # Return as TorchVision format
+    return results, targets
 
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
@@ -199,16 +269,47 @@ def get_targets_cpu(targets):
     return [{k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in target.items()}
             for target in targets]
 
+def show_batch_result(batch, preds, targets, score_threshold=0.1):
+    # Resize the images to the original size
+    proc_imgs, proc_targets = convert_batch_to_torchvision(batch, in_fmt='transformers')
+    orig_sizes = [label["orig_size"] for label in batch["labels"]]
+    for i, (img, pred, target, orig_size) in enumerate(zip(proc_imgs, preds, targets, orig_sizes)):
+        # Denormalize the image
+        denormalize_image = v2.Compose([
+            v2.Normalize(mean=[-mean/std for mean, std in zip(image_processor.image_mean, image_processor.image_std)],
+                        std=[1/std for std in image_processor.image_std])
+        ])
+        img = denormalize_image(img)
+        # Resize the images to the original size
+        img = F.resize(img, orig_size.tolist()).cpu()
+        # Show the image and GT bounding boxes
+        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
+        show_bounding_boxes(img, target['boxes'].cpu(), target['labels'].cpu(),
+                            idx_to_class=idx_to_class, ax=axes[0])
+        # Show the image and predicted bounding boxes
+        boxes_confident, labels_confident, scores_confident, _ = extract_cofident_boxes(
+            pred['boxes'].cpu(), pred['labels'].cpu(), pred['scores'].cpu(), score_threshold
+        )
+        show_bounding_boxes(img, boxes_confident, labels=labels_confident,
+                            idx_to_class=idx_to_class, ax=axes[1])
+        plt.show()
+
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
     """Validation step per batch"""
     # Predict the batch
     preds, targets = val_predict(batch, device, model)
     # Calculate the loss
-    loss = None
+    loss = calc_val_loss(preds, targets, criterion)
+
+    # Convert the predicitions and targets to TorchVision format
+    preds, targets = convert_preds_targets_to_torchvision(preds, targets)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
+    if batch_idx == 0:
+        show_batch_result(batch, preds, targets)
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -239,7 +340,7 @@ def train_one_epoch(loader, device, model,
             # Update the weights
             loss.backward()
             optimizer.step()
-            #tepoch.set_postfix(loss=loss.item())
+            tepoch.set_postfix(loss=loss.item())
     # lr_scheduler step
     if lr_scheduler is not None:
         lr_scheduler.step()

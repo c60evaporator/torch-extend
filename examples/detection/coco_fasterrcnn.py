@@ -140,8 +140,8 @@ model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_c
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
 # Criterion (Sum of all the losses)
-def criterion(loss_dict):
-    return sum(loss for loss in loss_dict.values())
+def criterion(outputs):
+    return sum(loss for loss in outputs.values())
 # Optimizer (Reference https://github.com/pytorch/vision/blob/main/references/classification/train.py)
 parameters = [p for p in model.parameters() if p.requires_grad]
 if OPT_NAME.startswith("sgd"):
@@ -182,8 +182,8 @@ def calc_train_loss(batch, model, criterion, device):
     inputs = [img.to(device) for img in batch[0]]
     targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
                 for t in batch[1]]
-    loss_dict = model(inputs, targets)
-    return criterion(loss_dict)
+    outputs = model(inputs, targets)
+    return criterion(outputs)
 
 def training_step(batch, batch_idx, device, model, criterion):
     """Training step per batch"""
@@ -194,6 +194,14 @@ def val_predict(batch, device, model):
     """Predict the validation batch"""
     # Predict the batch
     return model([img.to(device) for img in batch[0]]), batch[1]
+
+def calc_val_loss(preds, targets, criterion):
+    """Calculate the validation loss from the batch"""
+    return None
+
+def convert_preds_targets_to_torchvision(preds, targets):
+    """Convert the predictions and targets to TorchVision format"""
+    return preds, targets
 
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
@@ -211,7 +219,9 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Predict the batch
     preds, targets = val_predict(batch, device, model)
     # Calculate the loss
-    loss = None
+    loss = calc_val_loss(preds, targets, criterion)
+    # Convert the predicitions and targets to TorchVision format
+    preds, targets = convert_preds_targets_to_torchvision(preds, targets)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
