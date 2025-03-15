@@ -11,8 +11,10 @@ from torchmetrics.detection import MeanAveragePrecision
 from ..metrics import detection as det
 
 def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
+                        ious=None, iou_decimal=3,
+                        scores=None, score_decimal=3,
                         colors=None, fill=False, width=1,
-                        font_size=10,
+                        font_size=10, text_color=None,
                         anomaly_indices=None,
                         ax=None):
     """
@@ -29,6 +31,14 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
         If None, class ID is used for the plot
+    ious : List[float]
+        IoUs of the bounding boxes. If None, IoUs are not displayed.
+    iou_decimal : str
+        A decimal for the displayed IoUs. Only used when ious is not None.
+    scores : List[float]
+        Confidence scores for the bounding boxes. If None, the confidence scores are not displayed.
+    score_decimal : str
+        A decimal for the displayed confidence scores. Only used when scores is not None.
     colors : color or list of colors, optional
         List containing the colors of the boxes or single color for all boxes. The color can be represented as PIL strings e.g. "red" or "#FF00FF", or as RGB tuples e.g. ``(240, 10, 157)``.
         By default, random colors are generated for boxes.
@@ -38,6 +48,8 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
         Width of the line of the bounding boxes.
     font_size : int
         The requested font size in points.
+    text_color : str
+        Text color of the label, IoU, and confidence score. If None, the color is determined by `colors` based on the label.
     anomaly_indices : int
         Anomaly box indices displayed as crosses.
     ax : matplotlib axes, default=None
@@ -46,6 +58,16 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
     # If ax is None, use matplotlib.pyplot.gca()
     if ax is None:
         ax=plt.gca()
+    # If ious is None, create dummy ious
+    if ious is None:
+        ious = [float('nan')] * len(boxes)
+    # If scores is None, create dummy scores
+    if scores is None:
+        scores = [float('nan')] * len(boxes)
+    # If colors is None, create a color palette
+    if colors is None:
+        colors = sns.color_palette(n_colors=256).as_hex()
+
     # Convert class IDs to class names
     if idx_to_class is not None:
         label_names = [idx_to_class[int(label.item())] for label in labels]
@@ -53,19 +75,28 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
         label_names = [str(label.item()) for label in labels]
     # Show the image
     ax.imshow(image.permute(1, 2, 0))
-    # Create the pallette for the colors
-    if colors is None:
-        colors = sns.color_palette(n_colors=256).as_hex()
     # Show bounding boxes
-    for box, label, label_name in zip(boxes, labels, label_names):
-        
+    for box, label, label_name, score, iou in zip(boxes, labels, label_names, scores, ious):
+        # Show Rectangle of the bounding box
         r = patches.Rectangle(xy=(box[0], box[1]), 
                               width=box[2]-box[0], 
                               height=box[3]-box[1], 
                               ec=colors[label], fill=fill,
                               lw=width)
         ax.add_patch(r)
-        ax.text(box[0], box[1]-width, label_name, color=colors[label], fontsize=font_size)
+        # Show label, score, and IoU
+        shown_text = label_name
+        if not math.isnan(score):
+            shown_text += f', score={round(float(score),score_decimal)}'
+        if not math.isnan(iou):
+            if iou > 0.0:
+                shown_text += f', TP, IoU={round(float(iou),iou_decimal)}'
+            else:
+                shown_text += ', FP'
+        ax.text(box[0], box[1]-width, shown_text, 
+                color=colors[label] if text_color is None else text_color,
+                fontsize=font_size)
+    
     # image_with_boxes = draw_bounding_boxes(image, boxes, labels=label_names, colors=colors,
     #                                        fill=fill, width=width,
     #                                        font=font, font_size=100)
@@ -78,101 +109,11 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
             plt.text(boxes[idx][0], boxes[idx][1]-width, labels[idx], color='red', fontsize=8)
             ax.plot(boxes[idx][2], boxes[idx][3], marker='X', markersize=6, color = 'red') #　Anomaly bottomright
 
-def _show_pred_true_boxes(image, 
-                          boxes_pred, labels_pred,
-                          boxes_true, labels_true,
-                          idx_to_class = None,
-                          color_true = 'green', color_pred = 'red', ax=None,
-                          scores=None, score_decimal=3,
-                          calc_iou=False, iou_decimal=3):
-    """
-    Show the true bounding boxes and the predicted bounding boxes
-
-    Parameters
-    ----------
-    image : torch.Tensor (C x H x W)
-        Input image
-    boxes_pred : torch.Tensor (N_boxes_pred, 4)
-        Predicted bounding boxes with Torchvision object detection format
-    labels_pred : torch.Tensor (N_boxes_pred)
-        Predicted labels of the bounding boxes
-    boxes_true : torch.Tensor (N_boxes, 4)
-        True bounding boxes with Torchvision object detection format
-    labels_true : torch.Tensor (N_boxes)
-        True labels of the bounding boxes
-    idx_to_class : Dict[int, str]
-        A dict for converting class IDs to class names.
-        If None, class ID is used for the plot
-    color_true : str (color name)
-        A color for the ture bounding boxes. The color can be represented as PIL strings e.g. "red" or "#FF00FF", or as RGB tuples e.g. ``(240, 10, 157)``.
-    color_pred : str (color name)
-        A color for the predicted bounding boxes. The color can be represented as PIL strings e.g. "red" or "#FF00FF", or as RGB tuples e.g. ``(240, 10, 157)``.
-    scores : torch.Tensor (N_boxes_pred)
-        Confidence scores for the predicted bounding boxes.
-        
-        If None, the confidence scores are not displayed. 
-    conf_threshold : float
-        A threshold of the confidence score for selecting predicted bounding boxes shown.
-    score_decimal : str
-        A decimal for the displayed confidence scores.
-    calc_iou : True
-        If True, IoUs are calculated and shown
-    iou_decimal : str
-        A decimal for the displayed IoUs.
-    """
-    # If ax is None, use matplotlib.pyplot.gca()
-    if ax is None:
-        ax=plt.gca()
-    # If scores is None, create dummy scores
-    if scores is None:
-        scores = [float('nan')] * len(boxes_pred)
-    # Convert class IDs to class names
-    if idx_to_class is not None:
-        labels_pred = [idx_to_class[label.item()] for label in labels_pred]
-        labels_true = [idx_to_class[label.item()] for label in labels_true]
-
-    # Display raw image
-    img_permuted = image.permute(1, 2, 0)  # Change axis order from (ch, x, y) to (x, y, ch)
-    ax.imshow(img_permuted)
-
-    # Display true boxes
-    for box_true, label_true in zip(boxes_true.tolist(), labels_true):
-        r = patches.Rectangle(xy=(box_true[0], box_true[1]), 
-                              width=box_true[2]-box_true[0], 
-                              height=box_true[3]-box_true[1], 
-                              ec=color_true, fill=False)
-        ax.add_patch(r)
-        ax.text(box_true[0], box_true[1], label_true, color=color_true, fontsize=8)
-
-    # Calculate IoU
-    if calc_iou:
-        ious_confident = [
-            det.iou_object_detection(box_pred, label_pred, boxes_true, labels_true)
-            for box_pred, label_pred in zip(boxes_pred, labels_pred)
-        ]
-    else:
-        ious_confident = [float('nan')] * len(boxes_pred)
-    # Display predicted boxes
-    for box_pred, label_pred, score, iou in zip(boxes_pred, labels_pred, scores, ious_confident):
-        # Show Rectangle
-        r = patches.Rectangle(xy=(box_pred[0], box_pred[1]), 
-                              width=box_pred[2]-box_pred[0], 
-                              height=box_pred[3]-box_pred[1], 
-                              ec=color_pred, fill=False)
-        ax.add_patch(r)
-        # Show label, score, and IoU
-        text_pred = label_pred if isinstance(label_pred, str) else str(int(label_pred))
-        if not math.isnan(score):
-            text_pred += f', score={round(float(score),score_decimal)}'
-        if calc_iou:
-            if iou > 0.0:
-                text_pred += f', TP, IoU={round(float(iou),iou_decimal)}'
-            else:
-                text_pred += ', FP'
-        ax.text(box_pred[0], box_pred[1], text_pred, color=color_pred, fontsize=8)
-
 def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
-                          max_displayed_images=10, conf_threshold=0.5):
+                          max_displayed_images=10, score_threshold=0.2,
+                          calc_iou=True, score_decimal=3, iou_decimal=3,
+                          colors=None, fill=False, width=1,
+                          font_size=10, figsize=(12, 6)):
     """
     Show minibatch images with predicted bounding boxes.
 
@@ -180,28 +121,52 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
     ----------
     imgs : List[torch.Tensor (C x H x W)]
         List of images that are standardized to [0, 1]
-    
     preds : Dict[str, Any] (TorchVision detection prediction format)
         List of prediction results. The format should be as follows.
 
         [{'boxes': Tensor([[xmin1, ymin1, xmax1, ymax1],..]), 'labels': Tensor([labelindex1,..]), 'scores': Tensor([confidence1,..])}]
-    
     targets : Dict[str, Any] (TorchVision detection target format)
         List of the ground truths. The format should be as follows.
 
         [{'boxes': Tensor([[xmin1, ymin1, xmax1, ymax1],..]), 'labels': Tensor([labelindex1,..])}]
-    
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
-
     max_displayed_images : int
         number of maximum displayed images. This is in case of big batch size.
-
-    conf_threshold : float
+    score_threshold : float or List[float]
         A threshold of the confidence score for selecting predicted bounding boxes shown.
+    calc_iou : True
+        If True, IoUs are calculated and shown
+    score_decimal : str
+        A decimal for the displayed confidence scores.
+    iou_decimal : str
+        A decimal for the displayed IoUs.
+    colors : color or list of colors, optional
+        List containing the colors of the boxes or single color for all boxes. The color can be represented as PIL strings e.g. "red" or "#FF00FF", or as RGB tuples e.g. ``(240, 10, 157)``.
+        By default, random colors are generated for boxes.
+    fill : bool
+        If `True` fills the bounding box with specified color.
+    width : int
+        Width of the line of the bounding boxes.
+    font_size : int
+        The requested font size in points.
+    figsize: Tuple[int, int]
+        Figure size of the plot.
     """
+    # Check if score_threshold is list or not
+    if isinstance(score_threshold, list):
+        score_thresholds = score_threshold
+    else:
+        score_thresholds = [score_threshold]
+    
+    # Iterate over the images
     for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
-        img = (img*255).to(torch.uint8).cpu().detach()  # Change from float[0, 1] to uint[0, 255]
+        # Convert the image from float32 [0, 1] to uint8 [0, 255]
+        img = (img*255).to(torch.uint8).cpu().detach()
+        # Extract the ground truth boxes and labels
+        boxes_true = target['boxes'].cpu().detach()
+        labels_true = target['labels'].cpu().detach()
+        # Extract the predicted boxes, labels, and scores
         boxes = pred['boxes'].cpu().detach()
         labels = pred['labels'].cpu().detach().numpy()
         scores = pred['scores'].cpu().detach().numpy() if 'scores' in pred else None
@@ -209,29 +174,46 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
         labels = np.where(np.isin(labels, list(idx_to_class.keys())), labels, -1)
         idx_to_class_uk = {k: v for k, v in idx_to_class.items()}
         idx_to_class_uk[-1] = 'unknown'
-        # Show all bounding boxes
-        show_bounding_boxes(img, boxes, labels=labels, idx_to_class=idx_to_class_uk)
-        plt.title('All bounding boxes')
-        plt.show()
-        # Filter out confident bounding boxes whose confidence score > conf_threshold
-        if scores is not None:
-            boxes_confident, labels_confident, scores_confident, _ = det.extract_cofident_boxes(
-                    boxes, labels, scores, conf_threshold)
-        # Extract all predicted boxes if score is not set
-        else:
-            boxes_confident = copy.deepcopy(boxes)
-            labels_confident = copy.deepcopy(labels)
-            scores_confident = None
-        # Show the confident bounding boxes with True boxes
-        boxes_true = target['boxes']
-        labels_true = target['labels']
-        _show_pred_true_boxes(img, boxes_confident, labels_confident, 
-                              boxes_true, labels_true,
-                              idx_to_class=idx_to_class_uk,
-                              scores=scores_confident,
-                              calc_iou=True)
-        plt.title(f'Confident bounding boxes (confident score > {conf_threshold})')
-        plt.show()
+
+        # Confidence score threshold iteration
+        for score_thresh in score_thresholds:
+            # Create a canvas for plotting
+            fig, axes = plt.subplots(1, 2, figsize=figsize)
+            
+            # Show the ground truth boxes
+            show_bounding_boxes(img, boxes_true, labels=labels_true, 
+                                idx_to_class=idx_to_class,
+                                colors=colors, fill=fill, width=width, font_size=font_size,
+                                ax=axes[0])
+            axes[0].set_title('True bounding boxes')
+
+            # Filter out confident bounding boxes whose confidence score > score_thresh
+            if scores is not None:
+                boxes_confident, labels_confident, scores_confident, _ = det.extract_cofident_boxes(
+                        boxes, labels, scores, score_thresh)
+            # Extract all predicted boxes if score is not set
+            else:
+                boxes_confident = copy.deepcopy(boxes)
+                labels_confident = copy.deepcopy(labels)
+                scores_confident = None
+            # Calculate IoU
+            if calc_iou:
+                ious = [
+                    det.iou_object_detection(box_pred, label_pred, boxes_true, labels_true)
+                    for box_pred, label_pred in zip(boxes_confident, labels_confident)
+                ]
+            else:
+                ious = None
+            # Show the predicted bounding boxes with scores and IoUs
+            show_bounding_boxes(img, boxes_confident, labels=labels_confident,
+                                idx_to_class=idx_to_class, 
+                                ious=ious, iou_decimal=iou_decimal,
+                                scores=scores_confident, score_decimal=score_decimal,
+                                colors=colors, fill=fill, width=width, font_size=font_size,
+                                ax=axes[1])
+            plt.title(f'Predicted bounding boxes (Score > {score_thresh})')
+            plt.show()
+        
         if max_displayed_images is not None and i >= max_displayed_images - 1:
             break
 

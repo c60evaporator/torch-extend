@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
 
 # General Parameters
-EPOCHS = 10
+EPOCHS = 6
 BATCH_SIZE = 32
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
 DATA_ROOT = '../detection/datasets/VOC2012'
@@ -105,16 +105,24 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
                             shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=None if same_img_size_eval else collate_fn)
 
+# Denormalize the image
+def denormalize_image(img, transform):
+    # Denormalization based on the transforms
+    for tr in transform:
+        if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
+            reverse_transform = v2.Compose([
+                v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
+                                    std=[1/std for std in tr.std])
+            ])
+            img = reverse_transform(img)
+    return img
+
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
     # Denormalize the image
-    denormalize_image = v2.Compose([
-        v2.Normalize(mean=[-mean/std for mean, std in zip(IMAGENET_MEAN, IMAGENET_STD)],
-                    std=[1/std for std in IMAGENET_STD])
-    ])
-    img = denormalize_image(img)
-    # Show the image
+    img = denormalize_image(img, train_transform)
+    # Show the image and target
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
     show_segmentations(img, target, idx_to_class, bg_idx=0, border_idx=border_idx)
 
@@ -182,6 +190,7 @@ from tqdm import tqdm
 import numpy as np
 
 from torch_extend.metrics.semantic_segmentation import segmentation_ious
+from torch_extend.display.semantic_segmentation import show_predicted_segmentations
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
@@ -217,6 +226,14 @@ def convert_preds_targets_to_torchvision(preds, targets):
     """Convert the predictions and targets to TorchVision format"""
     return preds, targets
 
+def convert_images_to_torchvision(batch):
+    return batch[0]
+
+def plot_predictions(imgs, preds, targets, n_images=4):
+    show_predicted_segmentations(imgs, preds, targets, idx_to_class,
+                                 bg_idx=bg_idx, border_idx=border_idx, plot_raw_image=True,
+                                 max_displayed_images=n_images)
+
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
     if isinstance(preds, torch.Tensor):
@@ -242,6 +259,11 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
+    # Display the predictions of the first batch
+    if batch_idx == 0:
+        imgs = convert_images_to_torchvision(batch)
+        imgs = [denormalize_image(img, eval_transform) for img in imgs]
+        plot_predictions(imgs, preds, targets)
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -357,23 +379,12 @@ fig.tight_layout()
 plt.show()
 
 #%% Plot predicted segmentation in the first minibatch of the validation dataset
-from torch_extend.display.semantic_segmentation import show_predicted_segmentations
-
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
-# Denormalize the image
-denormalize_image = v2.Compose([
-    v2.Normalize(mean=[-mean/std for mean, std in zip(IMAGENET_MEAN, IMAGENET_STD)],
-                std=[1/std for std in IMAGENET_STD])
-])
-imgs_display = denormalize_image(imgs) if same_img_size_eval else [denormalize_image(img) for img in imgs]
-# Predict
 preds, targets = val_predict((imgs, targets), device, model)
-# Display the predicted segmentation
-show_predicted_segmentations(imgs_display, preds, targets, idx_to_class,
-                             bg_idx=bg_idx, border_idx=border_idx, plot_raw_image=True,
-                             max_displayed_images=10)
+imgs = [denormalize_image(img, eval_transform) for img in imgs]
+plot_predictions(imgs, preds, targets)
 
 #%% Display IOUs
 # Display IOUs

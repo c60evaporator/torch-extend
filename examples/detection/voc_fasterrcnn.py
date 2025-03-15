@@ -100,6 +100,18 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
                             shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=collate_fn)
 
+# Denormalize the image
+def denormalize_image(img, transform):
+    # Denormalization based on the transforms
+    for tr in transform:
+        if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
+            reverse_transform = v2.Compose([
+                v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
+                                    std=[1/std for std in tr.std])
+            ])
+            img = reverse_transform(img)
+    return img
+
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
@@ -112,6 +124,9 @@ def show_image_and_target(img, target, ax=None):
 train_iter = iter(train_dataloader)
 imgs, targets = next(train_iter)
 for i, (img, target) in enumerate(zip(imgs, targets)):
+    # Denormalize the image
+    img = denormalize_image(img, train_transform)
+    # Show the image and target
     show_image_and_target(img, target)
     plt.show()
 
@@ -165,6 +180,8 @@ import time
 from tqdm import tqdm
 from torchmetrics.detection import MeanAveragePrecision
 
+from torch_extend.display.detection import show_predicted_bboxes
+
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
     inputs = [img.to(device) for img in batch[0]]
@@ -191,6 +208,9 @@ def convert_preds_targets_to_torchvision(preds, targets):
     """Convert the predictions and targets to TorchVision format"""
     return preds, targets
 
+def convert_images_to_torchvision(batch):
+    return batch[0]
+
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
     return [{k: v.cpu() for k, v in pred.items()} 
@@ -200,6 +220,10 @@ def get_targets_cpu(targets):
     """Get the targets and store them to CPU as a list"""
     return [{k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in target.items()}
             for target in targets]
+
+def plot_predictions(imgs, preds, targets, n_images=4):
+    show_predicted_bboxes(imgs, preds, targets, idx_to_class,
+                          max_displayed_images=n_images)
 
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
@@ -213,6 +237,11 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
+    # Display the predictions of the first batch
+    if batch_idx == 0:
+        imgs = convert_images_to_torchvision(batch)
+        imgs = [denormalize_image(img, eval_transform) for img in imgs]
+        plot_predictions(imgs, preds, targets)
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -331,7 +360,8 @@ model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
 preds, targets = val_predict((imgs, targets), device, model)
-show_predicted_bboxes(imgs, preds, targets, idx_to_class)
+imgs = [denormalize_image(img, eval_transform) for img in imgs]
+plot_predictions(imgs, preds, targets)
 
 #%% Plot Average Precisions
 # Plot Average Precisions

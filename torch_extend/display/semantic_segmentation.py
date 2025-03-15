@@ -20,12 +20,13 @@ from ..metrics.semantic_segmentation import segmentation_ious_one_image
 #     pattern_list.append([255, 255, 255])
 #     return np.array(pattern_list, dtype=np.uint8)
 
-def create_segmentation_palette():
+def create_segmentation_palette(colors=None):
     """
     # Color palette for segmentation masks
     """
-    palette = sns.color_palette(n_colors=256).as_hex()
-    palette = [list(int(ip[i:i+2],16) for i in (1, 3, 5)) for ip in palette]  # Convert hex to RGB
+    if colors is None:
+        colors = sns.color_palette(n_colors=256).as_hex()
+    palette = [list(int(ip[i:i+2],16) for i in (1, 3, 5)) for ip in colors]  # Convert hex to RGB
     return palette
 
 def array1d_to_pil_image(array: torch.Tensor, palette: List[List[int]], 
@@ -121,7 +122,9 @@ def show_segmentation(image, target,
                                for idx in range(np.max(labels_unique[labels_unique != border_idx]))}
         else:
             idx_to_class_bd = {k: v for k, v in idx_to_class.items()}
-        # Add the border label
+        # Add the background and border label
+        if bg_idx is not None:
+            idx_to_class_bd[bg_idx] = 'background'
         if border_idx is not None:
             idx_to_class_bd[border_idx] = 'border'
         # Make the label text with IoU scores
@@ -229,9 +232,8 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
         palette = create_segmentation_palette()
     # Image loop
     for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
-        img = (img*255).to(torch.uint8)  # Change from float[0, 1] to uint[0, 255]
+        img = (img*255).to(torch.uint8).cpu().detach()  # Change from float[0, 1] to uint[0, 255]
         predicted_labels = pred.argmax(0).cpu().detach()
-        print(f'idx={i}')
         # Create a camvas
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         # Plot the true segmentation
@@ -245,6 +247,8 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
         # Calculate IoU
         if calc_iou:
             idx_to_class_bd = {k: v for k, v in idx_to_class.items()}
+            if bg_idx is not None:
+                idx_to_class_bd[bg_idx] = 'background'
             if border_idx is not None:
                 idx_to_class_bd[border_idx] = 'border'
             ious, _, _, _ = segmentation_ious_one_image(predicted_labels, target, list(idx_to_class_bd.keys()))

@@ -18,20 +18,20 @@ def iou_object_detection(box_pred, label_pred, boxes_true, labels_true,
     if match_label:
         boxes_gt = []
         labels_gt = []
-        for box_true, label_true in zip(boxes_true, labels_true):
+        for box_true, label_true in zip(boxes_true.cpu().detach(), labels_true.cpu().detach()):
             if label_true == label_pred:
                 boxes_gt.append(box_true)
                 labels_gt.append(label_true)
     # If the label should NOT be matched
     else:
-        boxes_gt = copy.deepcopy(boxes_true)
-        labels_gt = copy.deepcopy(labels_true)
+        boxes_gt = boxes_true.cpu().detach()
+        labels_gt = labels_true.cpu().detach()
 
     # Calculate IoU with every ground truth bbox
     ious = []
     for box_true, label_true in zip(boxes_gt, labels_gt):
         box_true = box_true.view(1, -1)
-        box_pred = box_pred.view(1, -1)
+        box_pred = box_pred.view(1, -1).cpu().detach()
         iou = float(ops.box_iou(box_true, box_pred))
         ious.append(iou)
 
@@ -43,9 +43,9 @@ def iou_object_detection(box_pred, label_pred, boxes_true, labels_true,
     return max_iou
 
 
-def extract_cofident_boxes(boxes, labels, scores, conf_threshold, masks=None):
+def extract_cofident_boxes(boxes, labels, scores, score_threshold, masks=None):
     """
-    Extract bounding boxes whose score > conf_threshold
+    Extract bounding boxes whose score > score_threshold
 
     Parameters
     ----------    
@@ -58,7 +58,7 @@ def extract_cofident_boxes(boxes, labels, scores, conf_threshold, masks=None):
     scores : array-like of shape (n_boxes,)
         A float array of confidence scores.
     
-    conf_threshold : float
+    score_threshold : float
         Bounding boxes whose confidence score exceed this threshold are used as the predicted bounding boxes.
     
     masks : array-like of shape (n_boxes, H, W)
@@ -71,9 +71,9 @@ def extract_cofident_boxes(boxes, labels, scores, conf_threshold, masks=None):
     masks_confident = []
     if masks is None:
         masks = [None] * len(boxes)
-    # Extract bounding boxes whose score > conf_threshold
+    # Extract bounding boxes whose score > score_threshold
     for score, box, label, mask in zip(scores, boxes.tolist(), labels, masks):
-        if score > conf_threshold:
+        if score > score_threshold:
             labels_confident.append(label)
             boxes_confident.append(Tensor(box))
             scores_confident.append(score)

@@ -112,6 +112,18 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
                             shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=None if same_img_size_eval else collate_fn)
 
+# Denormalize the image
+def denormalize_image(img, transform):
+    # Denormalization based on the transforms
+    for tr in transform:
+        if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
+            reverse_transform = v2.Compose([
+                v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
+                                    std=[1/std for std in tr.std])
+            ])
+            img = reverse_transform(img)
+    return img
+
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
@@ -119,11 +131,7 @@ def show_image_and_target(img, target, ax=None):
     if ax is None:
         ax=plt.gca()
     # Denormalize the image
-    denormalize_image = v2.Compose([
-        v2.Normalize(mean=[-mean/std for mean, std in zip(NORM_MEAN, NORM_STD)],
-                     std=[1/std for std in NORM_STD])
-    ])
-    img = denormalize_image(img)
+    img = denormalize_image(img, train_transform)
     # Show the image
     img_permute = img.permute(1, 2, 0)
     ax.imshow(img_permute)
@@ -239,6 +247,10 @@ def convert_preds_targets_to_torchvision(preds, targets):
     """Convert the predictions and targets to TorchVision format"""
     return preds, targets
 
+def convert_images_to_torchvision(batch):
+    """Convert the images to TorchVision format"""
+    return batch[0]
+
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
     return [pred.cpu() for pred in preds]
@@ -246,6 +258,17 @@ def get_preds_cpu(preds):
 def get_targets_cpu(targets):
     """Get the targets and store them to CPU as a list"""
     return [target.item() for target in targets]
+
+def plot_predictions(images, preds, targets, n_images=4):
+    """Plot the images with predictions and ground truths"""
+    for i, (img, pred, target) in enumerate(zip(images, preds, targets)):
+        predicted_label = torch.argmax(pred).item()
+        img_permute = img.permute(1, 2, 0)
+        plt.imshow(img_permute)
+        plt.title(f'pred: {idx_to_class[predicted_label]}, true: {idx_to_class[target.item()]}')
+        plt.show()
+        if i >= n_images:
+            break
 
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
@@ -259,6 +282,11 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
+    # Display the predictions of the first batch
+    if batch_idx == 0:
+        imgs = convert_images_to_torchvision(batch)
+        imgs = [denormalize_image(img, eval_transform) for img in imgs]
+        plot_predictions(imgs, preds, targets)
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -374,17 +402,8 @@ model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
 preds, targets = val_predict((imgs, targets), device, model)
-for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
-    predicted_label = torch.argmax(pred).item()
-    # Denormalize the image
-    denormalize_image = v2.Compose([
-        v2.Normalize(mean=[-mean/std for mean, std in zip(NORM_MEAN, NORM_STD)],
-                     std=[1/std for std in NORM_STD])
-    ])
-    img_permute = img.permute(1, 2, 0)
-    plt.imshow(img_permute)
-    plt.title(f'pred: {idx_to_class[predicted_label]}, true: {idx_to_class[target.item()]}')
-    plt.show()
+imgs = [denormalize_image(img, eval_transform) for img in imgs]
+plot_predictions(imgs, preds, targets)
 
 # %% Plot the confusion matrix
 # Plot the confusion matrix

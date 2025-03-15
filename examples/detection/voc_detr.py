@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
 
 # General Parameters
-EPOCHS = 30
+EPOCHS = 4
 BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
 DATA_ROOT = './datasets/VOC2012'
@@ -131,6 +131,25 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
                             shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=collate_fn)
 
+# Denormalize the image
+def denormalize_image(img, transform, processor):
+    # Denormalization based on the transforms
+    for tr in transform:
+        if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
+            reverse_transform = v2.Compose([
+                v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
+                                    std=[1/std for std in tr.std])
+            ])
+            img = reverse_transform(img)
+    # Denormalization based on the processor or Transformers
+    if processor.do_normalize:
+        denormalize_image = v2.Compose([
+            v2.Normalize(mean=[-mean/std for mean, std in zip(processor.image_mean, processor.image_std)],
+                        std=[1/std for std in processor.image_std])
+        ])
+        img = denormalize_image(img)
+    return img
+
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
@@ -145,12 +164,7 @@ batch = next(train_iter)
 imgs, targets = convert_batch_to_torchvision(batch, in_fmt='transformers')
 for i, (img, target) in enumerate(zip(imgs, targets)):
     # Denormalize the image
-    if image_processor.do_normalize:
-        denormalize_image = v2.Compose([
-            v2.Normalize(mean=[-mean/std for mean, std in zip(image_processor.image_mean, image_processor.image_std)],
-                        std=[1/std for std in image_processor.image_std])
-        ])
-        img = denormalize_image(img)
+    img = denormalize_image(img, train_transform, image_processor)
     # Show the image and target
     show_image_and_target(img, target)
     plt.show()
@@ -212,7 +226,7 @@ from torchvision.ops.boxes import box_convert
 import torchvision.transforms.v2.functional as F
 import matplotlib.pyplot as plt
 
-from torch_extend.metrics.detection import extract_cofident_boxes
+from torch_extend.display.detection import show_predicted_bboxes
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
@@ -259,6 +273,11 @@ def convert_preds_targets_to_torchvision(preds, targets):
     # Return as TorchVision format
     return results, targets
 
+def convert_images_to_torchvision(batch):
+    proc_imgs, _ = convert_batch_to_torchvision(batch, in_fmt='transformers')
+    orig_sizes = [label["orig_size"] for label in batch["labels"]]
+    return [F.resize(img, orig_size.tolist()) for img, orig_size in zip(proc_imgs, orig_sizes)]
+
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
     return [{k: v.cpu() for k, v in pred.items()} 
@@ -269,31 +288,9 @@ def get_targets_cpu(targets):
     return [{k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in target.items()}
             for target in targets]
 
-def show_batch_result(batch, preds, targets, score_threshold=0.1):
-    # Resize the images to the original size
-    proc_imgs, proc_targets = convert_batch_to_torchvision(batch, in_fmt='transformers')
-    orig_sizes = [label["orig_size"] for label in batch["labels"]]
-    for i, (img, pred, target, orig_size) in enumerate(zip(proc_imgs, preds, targets, orig_sizes)):
-        # Denormalize the image
-        denormalize_image = v2.Compose([
-            v2.Normalize(mean=[-mean/std for mean, std in zip(image_processor.image_mean, image_processor.image_std)],
-                        std=[1/std for std in image_processor.image_std])
-        ])
-        img = denormalize_image(img)
-        # Resize the images to the original size
-        img = F.resize(img, orig_size.tolist()).cpu()
-        # Show the image and GT bounding boxes
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-        img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
-        show_bounding_boxes(img, target['boxes'].cpu(), target['labels'].cpu(),
-                            idx_to_class=idx_to_class, ax=axes[0])
-        # Show the image and predicted bounding boxes
-        boxes_confident, labels_confident, scores_confident, _ = extract_cofident_boxes(
-            pred['boxes'].cpu(), pred['labels'].cpu(), pred['scores'].cpu(), score_threshold
-        )
-        show_bounding_boxes(img, boxes_confident, labels=labels_confident,
-                            idx_to_class=idx_to_class, ax=axes[1])
-        plt.show()
+def plot_predictions(imgs, preds, targets, n_images=4):
+    show_predicted_bboxes(imgs, preds, targets, idx_to_class,
+                          max_displayed_images=n_images)
 
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
@@ -302,14 +299,16 @@ def validation_step(batch, batch_idx, device, model, criterion,
     preds, targets = val_predict(batch, device, model)
     # Calculate the loss
     loss = calc_val_loss(preds, targets, criterion)
-
     # Convert the predicitions and targets to TorchVision format
     preds, targets = convert_preds_targets_to_torchvision(preds, targets)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
+    # Display the predictions of the first batch
     if batch_idx == 0:
-        show_batch_result(batch, preds, targets)
+        imgs = convert_images_to_torchvision(batch)
+        imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
+        plot_predictions(imgs, preds, targets)
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -422,12 +421,13 @@ fig.tight_layout()
 plt.show()
 
 #%% Plot predicted bounding boxes in the first minibatch of the validation dataset
-from torch_extend.display.detection import show_predicted_bboxes
-
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
-imgs, targets = next(val_iter)
-preds, targets = val_predict((imgs, targets), device, model)
+batch = next(val_iter)
+preds, labels = val_predict(batch, device, model)
+preds, targets = convert_preds_targets_to_torchvision(preds, labels)
+imgs = convert_images_to_torchvision(batch)
+imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
 show_predicted_bboxes(imgs, preds, targets, idx_to_class)
 
 #%% Plot Average Precisions
