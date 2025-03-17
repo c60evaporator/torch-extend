@@ -311,7 +311,7 @@ def train_one_epoch(loader, device, model,
             # Update the weights
             loss.backward()
             optimizer.step()
-            #tepoch.set_postfix(loss=loss.item())
+            tepoch.set_postfix(loss=loss.item())
     # lr_scheduler step
     if lr_scheduler is not None:
         lr_scheduler.step()

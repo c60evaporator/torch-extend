@@ -1,3 +1,4 @@
+"""This script is based on https://github.com/NielsRogge/Transformers-Tutorials/blob/master/DETR/Fine_tuning_DetrForObjectDetection_on_custom_dataset_(balloon).ipynb"""
 #%% Select the device and hyperparameters
 ###### 1. Select the device and hyperparameters ######
 import os
@@ -72,10 +73,10 @@ from torch_extend.data_converter.detection import convert_batch_to_torchvision
 # Dataset
 train_dataset = VOCDetection(DATA_ROOT, image_set='train', download=True,
                              transforms=train_transform,
-                             output_format='transformers', processor=image_processor)
+                             out_fmt='transformers', processor=image_processor)
 val_dataset = VOCDetection(DATA_ROOT, image_set='val',
                            transforms=eval_transform,
-                           output_format='transformers', processor=image_processor)
+                           out_fmt='transformers', processor=image_processor)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
 num_classes = max(class_to_idx.values()) + 1
@@ -112,22 +113,20 @@ idx_to_class = {v: k for k, v in class_to_idx.items()}
 
 
 
-# Collate function for the DataLoader (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
+# Collate function for the DataLoader 
+# Need to apply `processor.pad()` if image sizes are diffrent (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
 def collate_fn(batch):
-    pixel_values = [item[0] for item in batch]
+    labels = [item['labels'] for item in batch]
+    # Pad the images
+    pixel_values = [item['pixel_values'] for item in batch]
     encoding = image_processor.pad(pixel_values, return_tensors="pt")
-    labels = [item[1] for item in batch]
-    batch = {}
-    batch['pixel_values'] = encoding['pixel_values']
-    batch['pixel_mask'] = encoding['pixel_mask']
-    batch['labels'] = labels
-    return batch
+    return {'pixel_values': encoding['pixel_values'], 'pixel_mask': encoding['pixel_mask'], 'labels': labels}
 
 # Dataloader
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
                               shuffle=True, num_workers=NUM_WORKERS,
                               collate_fn=collate_fn)
-val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
+val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
                             shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=collate_fn)
 
@@ -153,6 +152,8 @@ def denormalize_image(img, transform, processor):
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
+    # Denormalize the image
+    img = denormalize_image(img, train_transform, image_processor)
     # Show the image
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
     boxes, labels = target['boxes'], target['labels']
@@ -163,8 +164,6 @@ train_iter = iter(train_dataloader)
 batch = next(train_iter)
 imgs, targets = convert_batch_to_torchvision(batch, in_fmt='transformers')
 for i, (img, target) in enumerate(zip(imgs, targets)):
-    # Denormalize the image
-    img = denormalize_image(img, train_transform, image_processor)
     # Show the image and target
     show_image_and_target(img, target)
     plt.show()
@@ -248,8 +247,8 @@ def val_predict(batch, device, model):
     # Predict the batch
     pixel_values = batch["pixel_values"].to(device)
     pixel_mask = batch["pixel_mask"].to(device)
-    labels = [{k: v.to(device) for k, v in t.items()} for t in batch["labels"]]
     preds = model(pixel_values=pixel_values, pixel_mask=pixel_mask)
+    labels = [t for t in batch["labels"]]
     return preds, labels
 
 def calc_val_loss(preds, targets, criterion):

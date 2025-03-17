@@ -1,6 +1,7 @@
 from typing import Any, Callable, List, Dict, Optional, Tuple, Literal
 import torch
 import albumentations as A
+from torchvision.transforms import v2
 import numpy as np
 from PIL import Image
 import os
@@ -20,7 +21,7 @@ class VOCInstanceSegmentation(VOCDetection):
         Root directory of the VOC Dataset.
     idx_to_class : Dict[int, str]
         A dict which indicates the conversion from the label indices to the label names
-    output_format : Literal["torchvision", "transformers"]
+    out_fmt : Literal["torchvision", "transformers"]
         The output format of the image and target, either ``"torchvision"`` or ``"transformers"``.
     image_set : str
         Select the image_set to use, ``"train"``, ``"trainval"`` or ``"val"``.
@@ -32,8 +33,12 @@ class VOCInstanceSegmentation(VOCDetection):
         A function/transform that takes in the target and transforms it.
     transforms : callable, optional
         A function/transform that takes input sample and its target as entry and returns a transformed version.
+    reduce_labels : bool
+        If True, the label 0 is regarded as the background and all the labels will be reduced by 1. Also, the class_to_idx will
+
+        For example, if the labels are [1, 3] and the class_to_idx is {1: 'aeroplane', 2: 'bicycle', 3: 'bird'}, the labels will be [0, 2] and the class_to_idx will be {0: 'aeroplane', 1: 'bicycle', 2: 'bird'}.
     processor : callable, optional
-        An image processor instance for HuggingFace Transformers. Only available if ``output_format="transformers"``. 
+        An image processor instance for HuggingFace Transformers. Only available if ``out_fmt="transformers"``. 
     border_idx : int
         The index of the border in the target mask.
     """
@@ -42,17 +47,19 @@ class VOCInstanceSegmentation(VOCDetection):
         self,
         root: str,
         idx_to_class: Dict[int, str] = None,
-        output_format: Literal["torchvision", "transformers"] = "torchvision",
+        out_fmt: Literal["torchvision", "transformers"] = "torchvision",
         image_set: str = "train",
         download: bool = False,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
         transforms: Optional[Callable] = None,
+        reduce_labels: bool = False,
         processor: Optional[BaseImageProcessor] = None,
-        border_idx: int = 255
+        border_idx: int = 255,
     ):
-        super().__init__(root, idx_to_class, output_format, image_set, download,
-                         transform, target_transform, transforms, processor)
+        super().__init__(root, idx_to_class, out_fmt, image_set, download,
+                         transform, target_transform, transforms,
+                         reduce_labels, processor)
         self.border_idx = border_idx
 
     def __len__(self) -> int:
@@ -88,7 +95,7 @@ class VOCInstanceSegmentation(VOCDetection):
     def _convert_target(self, boxes, labels, masks, border_mask, index, w, h):
         """Convert VOC to TorchVision format"""
         # Get the labels
-        labels = torch.tensor(labels, dtype=torch.int64) if len(boxes) > 0 else torch.zeros(size=(0,), dtype=torch.float32)
+        labels = torch.tensor(labels, dtype=torch.int64) if len(boxes) > 0 else torch.zeros(size=(0,), dtype=torch.int64)
         # Convert the bounding boxes
         boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Convert the instance masks
@@ -109,6 +116,48 @@ class VOCInstanceSegmentation(VOCDetection):
                   'border_mask': border_mask,
                   'image_path': self.images_instance[index]}
         return target
+    
+    def _convert_target_to_transformers(self, image, image_id, target):
+        """
+        Convert VOC to Transformers format
+
+        Returns
+        -------
+        {"pixel_values": torch.Tensor(C, H, W), "pixel_mask": torch.Tensor(H, W), "mask_labels": torch.Tensor(n_instances, H, W), "class_labels": torch.Tensor(n_instances)}
+
+        If the output image sizes are different, `processor.encode_inputs(pixel_values, segmentation_map, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
+        """
+        # Convert instance masks into one mask with instance IDs
+        segmentation_map = torch.zeros_like(target['masks'][0])
+        for i, mask in enumerate(target['masks']):
+            segmentation_map[mask.bool()] = i+1
+        # mapping between instance IDs and class labels
+        inst2class = {i: label for i, label in enumerate([0] + target['labels'].tolist())}
+        # Apply the Transformers processor
+        encoding = self.processor(images=image, segmentation_maps=segmentation_map,
+                                  instance_id_to_semantic_id=inst2class,
+                                  return_tensors="pt")
+        # If images sizes are the same
+        if self.same_img_size:
+            # Remove batch dimension and return as dictionary
+            return {
+                "pixel_values": encoding["pixel_values"].squeeze(),
+                "pixel_mask": encoding["pixel_mask"].squeeze(),
+                "mask_labels": encoding["mask_labels"][0][1:, :, :],  # remove background
+                "class_labels": encoding["class_labels"][0][1:]  # remove background
+            }
+        # If images sizes are different, `processor.encode_inputs(pixel_values, segmentation_map, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
+        else:
+            # Recreate the segmentation map
+            segmentation_map = torch.zeros_like(encoding["pixel_mask"].squeeze())
+            for i, mask in enumerate(encoding["mask_labels"][0][1:, :, :]):
+                segmentation_map[mask.bool()] = i+1
+            # Remove batch dimension and return as dictionary
+            return {
+                "images": encoding["pixel_values"].squeeze(),
+                "segmentation_maps": segmentation_map,
+                "instance_id_to_semantic_id": inst2class
+            }
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         """"""
@@ -138,12 +187,12 @@ class VOCInstanceSegmentation(VOCDetection):
             target = self._convert_target(boxes, labels, masks, border_mask, index, w, h)
         
         # Output as TorchVision format
-        if self.output_format == "torchvision":
+        if self.out_fmt == "torchvision":
             return image, target
 
         # Output as Transformers format
-        elif self.output_format == "transformers":
-            return self._convert_to_transformers(index, image, target)
+        elif self.out_fmt == "transformers":
+            return self._convert_target_to_transformers(image, index, target)
     
     def get_image_target_path(self, index: int):
         """Get the image and target path of the dataset."""

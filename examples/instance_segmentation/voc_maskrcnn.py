@@ -45,9 +45,7 @@ torch.manual_seed(42)
 ###### 2. Define the transforms ######
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-# Note: ImageNet Normalization is not needed for TorchVision Faster R-CNN
-# IMAGENET_MEAN = [0.485, 0.456, 0.406]
-# IMAGENET_STD = [0.229, 0.224, 0.225]
+# Note: ImageNet Normalization is not needed for TorchVision Mask R-CNN
 NORM_MEAN = [0.0, 0.0, 0.0]
 NORM_STD = [1.0, 1.0, 1.0]
 
@@ -202,6 +200,10 @@ def calc_val_loss(preds, targets, criterion):
 
 def convert_preds_targets_to_torchvision(preds, targets):
     """Convert the predictions and targets to TorchVision format"""
+    # Mask float32(N, 1, H, W) -> uint8(N, H, W)
+    preds = [{k: torch.round(v.squeeze(1)).to(torch.uint8)
+              if k == 'masks' else v for k, v in pred.items()}
+             for pred in preds]
     return preds, targets
 
 def convert_images_to_torchvision(batch):
@@ -209,10 +211,7 @@ def convert_images_to_torchvision(batch):
 
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
-    # Mask float32(N, 1, H, W) -> uint8(N, H, W)
-    return [{k: torch.round(v.squeeze(1)).to(torch.uint8).cpu()
-             if k == 'masks' else v.cpu()
-             for k, v in pred.items()} 
+    return [{k: v.cpu() for k, v in pred.items()} 
             for pred in preds]
 
 def get_targets_cpu(targets):
@@ -272,7 +271,7 @@ def train_one_epoch(loader, device, model,
             # Update the weights
             loss.backward()
             optimizer.step()
-            #tepoch.set_postfix(loss=loss.item())
+            tepoch.set_postfix(loss=loss.item())
     # lr_scheduler step
     if lr_scheduler is not None:
         lr_scheduler.step()

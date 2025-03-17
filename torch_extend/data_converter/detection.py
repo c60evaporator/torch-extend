@@ -152,19 +152,29 @@ def convert_batch_to_torchvision(batch, in_fmt='transformers'):
     in_fmt : Literal['transformers']
         Format of the input batch data.
 
-        'transformers': {'pixel_values': Tensor([[[r1, g1, b1],..],..]), 'pixel_mask': Tensor([[0, 1, 1,..],..]), 'labels': List[{'boxes': Tensor([[xmin1, ymin1, xmax1, ymax1],..]), 'labels': Tensor([labelindex1, labelindex2,..]}]}
+        'transformers': {"pixel_values": torch.Tensor(B, C, H, W), "pixel_mask": torch.Tensor(B, H, W), "labels": [{"boxes": torch.Tensor(n_instances, 4), "class_labels": torch.Tensor(n_instances), "org_size": Tuple[int, int],...},...]} with boxes in normalized cxcywh format
+    
+    Returns
+    -------
+    images: List[torch.Tensor(C, H, W)]
+        Images in the batch
+    
+    targets: List[{{"boxes": torch.Tensor(n_instances, 4), "labels": torch.Tensor(n_instances)}]
+        Targets in the batch
+
+        The box format is [xmin, ymin, xmax, ymax]
     """
     images = []
     targets = []
     if in_fmt == 'transformers':
-        for pixel_values, pixel_mask, labels in zip(batch['pixel_values'], batch['pixel_mask'], batch['labels']):
+        for pixel_value, pixel_mask, labels in zip(batch['pixel_values'], batch['pixel_mask'], batch['labels']):
             # Get the mask rectangle
             nonzero_rows = torch.nonzero(pixel_mask.sum(dim=1))
             y_min, y_max = nonzero_rows[0].item(), nonzero_rows[-1].item()
             nonzero_cols = torch.nonzero(pixel_mask.sum(dim=0))
             x_min, x_max = nonzero_cols[0].item(), nonzero_cols[-1].item()
             # Extract the effective area
-            image = pixel_values[:, y_min:y_max+1, x_min:x_max+1]
+            image = pixel_value[:, y_min:y_max+1, x_min:x_max+1]
             w, h = x_max - x_min + 1, y_max - y_min + 1
             # Convert the labels to the target
             target = {}

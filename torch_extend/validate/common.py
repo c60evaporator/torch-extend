@@ -1,7 +1,9 @@
 import albumentations as A
 from torchvision.transforms import v2
+from transformers import BaseImageProcessor
 
-def validate_same_img_size(transforms):
+def validate_same_img_size(transforms: v2.Compose | A.Compose,
+                           processor: BaseImageProcessor = None) -> bool:
     """Check if the transforms resize/crop the images to the same size"""
     if transforms is None:
         return False
@@ -24,4 +26,7 @@ def validate_same_img_size(transforms):
            isinstance(t, v2.RandomResizedCrop):
             if t.size[0] == t.size[1]:
                 return True
+    if processor is not None:
+        if processor.do_resize and 'height' in processor.size.keys() and 'width' in processor.size.keys():
+            return True
     return False

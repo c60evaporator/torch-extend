@@ -19,6 +19,7 @@ except ImportError:
     from xml.etree.ElementTree import parse as ET_parse
 
 from .utils import DetectionOutput
+from ...validate.common import validate_same_img_size
 
 def parse_voc_xml(node: ET_Element) -> Dict[str, Any]:
     """
@@ -154,40 +155,53 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
         A function/transform that takes in the target and transforms it.
     transforms : callable, optional
         A function/transform that takes input sample and its target as entry and returns a transformed version.
+    reduce_labels : bool
+        If True, the label 0 is regarded as the background and all the labels will be reduced by 1. Also, the class_to_idx will
+
+        For example, if the labels are [1, 3] and the class_to_idx is {1: 'aeroplane', 2: 'bicycle', 3: 'bird'}, the labels will be [0, 2] and the class_to_idx will be {0: 'aeroplane', 1: 'bicycle', 2: 'bird'}.
     processor : callable, optional
-        An image processor instance for HuggingFace Transformers. Only available if ``output_format="transformers"``. 
+        An image processor instance for HuggingFace Transformers. Only available if ``out_fmt="transformers"``.
     """
 
     def __init__(
         self, 
         root: str,
         idx_to_class : Dict[int, str] = None,
-        output_format: Literal["torchvision", "transformers"] = "torchvision",
+        out_fmt: Literal["torchvision", "transformers"] = "torchvision",
         image_set: str = "train",
         download: bool = False,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
         transforms: Optional[Callable] = None,
+        reduce_labels: bool = False,
         processor: Optional[BaseImageProcessor] = None
     ):
         super().__init__(root, image_set, download, transform, target_transform, transforms)
+        self.ids = os.listdir(root)
+        # Index to class dictionary
         if idx_to_class is None:
             self.idx_to_class = self.IDX_TO_CLASS
         else:
             self.idx_to_class = idx_to_class
+        # Reduce the labels
+        self.reduce_labels = reduce_labels
+        if self.reduce_labels:
+            self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
+        # Class to index dictionary
         self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
-        self.ids = os.listdir(root)
-        self.output_format = output_format
-        if output_format == "transformers":
-            self.transform = None
-            self.target_transform = None
-            self.transforms = None
+        # Set the output format
+        self.out_fmt = out_fmt
+        # Set Transformers processor
+        if out_fmt == "transformers":
             if processor is None:
-                raise ValueError("`processor` must be provided if `output_format` is 'transformers'")
+                raise ValueError("`processor` must be provided if `out_fmt` is 'transformers'")
             else:
                 self.processor = processor
         else:
             self.processor = None
+        # Chech whether all the image sizes are the same
+        image_transform = self.transforms if self.transforms is not None else self.transform
+        self.same_img_size = validate_same_img_size(image_transform, self.processor)
 
     def __len__(self) -> int:
         return len(self.images_detection)
@@ -223,7 +237,15 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
         return target
     
     def _convert_target_to_transformers(self, image, image_id, target):
-        """Convert VOC to Transformers format (Reference: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/DETR/Fine_tuning_DetrForObjectDetection_on_custom_dataset_(balloon).ipynb)"""
+        """
+        Convert VOC to Transformers format (Reference: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/DETR/Fine_tuning_DetrForObjectDetection_on_custom_dataset_(balloon).ipynb)
+        
+        Returns
+        -------
+        {"pixel_values": torch.Tensor(C, H, W), "pixel_mask": torch.Tensor(H, W), "labels": {"boxes": torch.Tensor(n_instances, 4), "class_labels": torch.Tensor(n_instances), "org_size": Tuple[int, int],...}} with boxes in normalized cxcywh format
+
+        If the output image sizes are different, `processor.pad(pixel_values, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
+        """
         # format annotations in COCO format
         annotations = [
             {
@@ -235,12 +257,16 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
             }
             for box, label in zip(target['boxes'], target['labels'])
         ]
-        encoding = self.processor(images=image, 
+        # Apply the Transformers processor
+        encoding = self.processor(images=image,
                                   annotations={'image_id': image_id, 'annotations': annotations},
                                   return_tensors="pt")
-        pixel_values = encoding["pixel_values"].squeeze() # remove batch dimension
-        target = encoding["labels"][0] # remove batch dimension
-        return pixel_values, target
+        # Remove batch dimension and return as dictionary
+        return {
+            "pixel_values": encoding["pixel_values"].squeeze(),
+            "pixel_mask": encoding["pixel_mask"].squeeze(),
+            "labels": encoding["labels"][0]
+        }
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         image = self._load_image(index)
@@ -263,9 +289,9 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
             target = self._convert_target(boxes, labels, index)
 
         # Output as TorchVision format
-        if self.output_format == "torchvision":
+        if self.out_fmt == "torchvision":
             return image, target
 
         # Output as Transformers format
-        elif self.output_format == "transformers":
+        elif self.out_fmt == "transformers":
             return self._convert_target_to_transformers(image, index, target)

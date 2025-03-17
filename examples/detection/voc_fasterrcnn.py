@@ -115,6 +115,8 @@ def denormalize_image(img, transform):
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
+    # Denormalize the image
+    img = denormalize_image(img, train_transform)
     # Show the image
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
     boxes, labels = target['boxes'], target['labels']
@@ -124,8 +126,6 @@ def show_image_and_target(img, target, ax=None):
 train_iter = iter(train_dataloader)
 imgs, targets = next(train_iter)
 for i, (img, target) in enumerate(zip(imgs, targets)):
-    # Denormalize the image
-    img = denormalize_image(img, train_transform)
     # Show the image and target
     show_image_and_target(img, target)
     plt.show()
@@ -272,7 +272,7 @@ def train_one_epoch(loader, device, model,
             # Update the weights
             loss.backward()
             optimizer.step()
-            #tepoch.set_postfix(loss=loss.item())
+            tepoch.set_postfix(loss=loss.item())
     # lr_scheduler step
     if lr_scheduler is not None:
         lr_scheduler.step()
