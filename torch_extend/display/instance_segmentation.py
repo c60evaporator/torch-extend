@@ -1,8 +1,9 @@
-from typing import Dict, Literal, Any
+from typing import List, Literal, Any
 import torch
 from torchvision.utils import draw_bounding_boxes
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.figure import Figure
 import seaborn as sns
 import copy
 import numpy as np
@@ -153,11 +154,11 @@ def show_instance_masks(image, masks, boxes=None,
 
 def show_predicted_instances(imgs, preds, targets, idx_to_class,
                              border_mask=None, separate_boxes=False,
-                             max_displayed_images=10, score_threshold=0.5,
+                             max_displayed_images=10, score_threshold=0.2,
                              calc_iou=True, score_decimal=3, iou_decimal=3,
                              colors=None, fill=False, width=1,
                              font_size=10, text_color=None, figsize=None,
-                             alpha=0.5):
+                             alpha=0.5) -> List[Figure]:
     """
     Show images with predicted bounding boxes and masks for Instance Segmentation.
 
@@ -211,6 +212,7 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
     else:
         score_thresholds = [score_threshold]
     
+    figures = []
     # Iterate over the images
     for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
         # Convert the image from float32 [0, 1] to uint8 [0, 255]
@@ -315,5 +317,9 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
             
             fig.suptitle(f'Comparison of Ground Truth and Predicted Instances (Image {i})')
             plt.show()
+            figures.append(fig)
+        
         if max_displayed_images is not None and i >= max_displayed_images - 1:
             break
+
+    return figures

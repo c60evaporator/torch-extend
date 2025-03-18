@@ -4,6 +4,8 @@
 import os
 import sys
 import torch
+import mlflow
+from datetime import datetime
 
 # Add the root directory of the repository to system pathes (For debugging)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -33,6 +35,43 @@ LR_BACKBONE = 5e-6  # Learning rate for the backbone
 # Model Parameters
 MODEL_NAME = 'facebook/detr-resnet-50'
 
+# Log Parameters
+MLFLOW_TRACKING_URI = './log/mlruns'
+MLFLOW_EXPERIMENT_NAME = 'voc_detection'
+MLFLOW_ARTIFACT_LOCATION = None
+
+# Start MLFlow experiment run
+if MLFLOW_TRACKING_URI is not None:
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    experiment = mlflow.get_experiment_by_name(MLFLOW_EXPERIMENT_NAME)
+    if experiment is None:  # Create a new experiment if it doesn't exist
+        experiment_id = mlflow.create_experiment(
+                                name=MLFLOW_EXPERIMENT_NAME,
+                                artifact_location=MLFLOW_ARTIFACT_LOCATION)
+    else: # Get an experiment ID if it exists
+        experiment_id = experiment.experiment_id
+    # Start the run
+    run = mlflow.start_run(experiment_id=experiment_id, run_name=f'{MODEL_NAME}_{datetime.now().strftime("%Y%m%d%H%M")}')
+    # Log the hyperparameters
+    mlflow.log_param('model_name', MODEL_NAME)
+    mlflow.log_param('EPOCHS', EPOCHS)
+    mlflow.log_param('BATCH_SIZE', BATCH_SIZE)
+    mlflow.log_param('NUM_WORKERS', NUM_WORKERS)
+    mlflow.log_param('OPT_NAME', OPT_NAME)
+    mlflow.log_param('LR', LR)
+    mlflow.log_param('WEIGHT_DECAY', WEIGHT_DECAY)
+    mlflow.log_param('MOMENTUM', MOMENTUM)
+    mlflow.log_param('RMSPROP_ALPHA', RMSPROP_ALPHA)
+    mlflow.log_param('EPS', EPS)
+    mlflow.log_param('ADAM_BETAS', ADAM_BETAS)
+    mlflow.log_param('LR_SCHEDULER', LR_SCHEDULER)
+    mlflow.log_param('LR_GAMMA', LR_GAMMA)
+    mlflow.log_param('LR_STEP_SIZE', LR_STEP_SIZE)
+    mlflow.log_param('LR_STEPS', LR_STEPS)
+    mlflow.log_param('LR_T_MAX', LR_T_MAX)
+    mlflow.log_param('LR_PATIENCE', LR_PATIENCE)
+    mlflow.end_run()
+
 # Select the device
 DEVICE = 'cuda'
 if DEVICE == 'cuda':
@@ -59,6 +98,13 @@ train_transform = A.Compose([
 # Transforms for validation and test
 eval_transform = A.Compose([
 ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+
+# Log the transforms and processor
+if MLFLOW_TRACKING_URI is not None:
+    with mlflow.start_run(run_id=run.info.run_id):
+        mlflow.log_param('train_transform', train_transform)
+        mlflow.log_param('eval_transform', eval_transform)
+        mlflow.log_param('processor', image_processor)
 
 # %% Define the dataset
 ###### 3. Define the dataset ######
@@ -224,6 +270,9 @@ from torchmetrics.detection import MeanAveragePrecision
 from torchvision.ops.boxes import box_convert
 import torchvision.transforms.v2.functional as F
 import matplotlib.pyplot as plt
+import cv2
+import numpy as np
+import io
 
 from torch_extend.display.detection import show_predicted_bboxes
 
@@ -288,8 +337,9 @@ def get_targets_cpu(targets):
             for target in targets]
 
 def plot_predictions(imgs, preds, targets, n_images=4):
-    show_predicted_bboxes(imgs, preds, targets, idx_to_class,
-                          max_displayed_images=n_images)
+    figures = show_predicted_bboxes(imgs, preds, targets, idx_to_class,
+                                    max_displayed_images=n_images)
+    return figures
 
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
@@ -307,7 +357,16 @@ def validation_step(batch, batch_idx, device, model, criterion,
     if batch_idx == 0:
         imgs = convert_images_to_torchvision(batch)
         imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
-        plot_predictions(imgs, preds, targets)
+        figures = plot_predictions(imgs, preds, targets)
+        # Log the images to MLFlow
+        if MLFLOW_TRACKING_URI is not None:
+            with mlflow.start_run(run_id=run.info.run_id):
+                for i, fig in enumerate(figures):
+                    img_byte_arr = io.BytesIO()
+                    fig.savefig(img_byte_arr, format='png')
+                    img_byte_arr = cv2.imdecode(np.frombuffer(img_byte_arr.getvalue(), np.uint8), 1)
+                    img_byte_arr = img_byte_arr[:,:,::-1] # BGR->RGB
+                    mlflow.log_image(img_byte_arr, key=f'img{i}', step=i_epoch)
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -320,8 +379,8 @@ def calc_epoch_metrics(preds, targets):
     global last_targets
     last_preds = preds
     last_targets = targets
-    print(f'BoxAP@50-95={map_score["map"].item()}, BoxAP@50={map_score["map_50"].item()}, BoxAP@75={map_score["map_75"].item()}')
-    return {'BoxAP@50-95': map_score["map"].item(), 'BoxAP@50': map_score["map_50"].item(), 'BoxAP@75': map_score["map_75"].item()}
+    print(f'BoxAP_50-95={map_score["map"].item()}, BoxAP_50={map_score["map_50"].item()}, BoxAP_75={map_score["map_75"].item()}')
+    return {'BoxAP_50-95': map_score["map"].item(), 'BoxAP_50': map_score["map_50"].item(), 'BoxAP_75': map_score["map_75"].item()}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -392,6 +451,13 @@ for i_epoch in range(EPOCHS):
     elapsed_time = time.time() - start
     print(f'Epoch: {i_epoch + 1}, train_loss: {train_loss_epoch}, val_loss: {val_loss_epoch}, elapsed_time: {time.time() - start}')
     print(f'Epoch: {i_epoch + 1}, ' + ' '.join([f'{k}={v}' for k, v in val_metrics_epoch.items()]))
+    # Record the loss
+    if MLFLOW_TRACKING_URI is not None:
+        with mlflow.start_run(run_id=run.info.run_id):
+            mlflow.log_metric(key="train_loss", value=train_loss_epoch, step=i_epoch)
+            mlflow.log_metrics(val_metrics_epoch, step=i_epoch)
+            if val_loss_epoch is not None:
+                mlflow.log_metric(key="val_loss", value=val_loss_epoch, step=i_epoch)
 
 # %% Plot the training history
 ###### 7. Plot the training history ######

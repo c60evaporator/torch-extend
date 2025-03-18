@@ -16,20 +16,21 @@ VERSION = torch_extend.__version__
 PYTHON_REQUIRES = ">=3.6"
 
 INSTALL_REQUIRES = [
-    'torch>=2.5.1',
-    'torchvision>=0.20.1',
-    'albumentations>=1.4.24',
+    'torch>=2.6.0',
+    'torchvision>=0.21.0',
+    'albumentations>=2.0.5',
+    'transformers>=4.49.0',
+    'torchmetrics>=1.6.3'
     'pycocotools>=2.0.8',
-    'opencv-python>=4.10.0',
-    'matplotlib>=3.10.0',
+    'opencv-python>=4.11.0',
     'seaborn>=0.13.2',
-    'pandas>=2.2.3',
-    'scikit-learn>=1.6.0',
+    'scikit-learn>=1.6.1',
 ]
 
 EXTRAS_REQUIRE = {
     'tutorial': [
-        'tqdm>=4.67.1',
+        'tqdm>=4.66.1',
+        'mlflow>=2.21.0'
     ]
 }
 

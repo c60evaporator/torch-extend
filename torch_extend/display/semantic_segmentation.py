@@ -2,6 +2,7 @@ from typing import List
 import torch
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.figure import Figure
 import seaborn as sns
 import numpy as np
 from PIL import Image
@@ -184,7 +185,7 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
                                  bg_idx=0, border_idx=None,
                                  plot_raw_image=True,
                                  max_displayed_images=None,
-                                 calc_iou=True):
+                                 calc_iou=True) -> List[Figure]:
     """
     Show predicted minibatch images with predicted and true segmentation.
 
@@ -230,6 +231,8 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
     # Auto palette generation
     if palette is None:
         palette = create_segmentation_palette()
+
+    figures = []
     # Image loop
     for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
         img = (img*255).to(torch.uint8).cpu().detach()  # Change from float[0, 1] to uint[0, 255]
@@ -264,5 +267,9 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
                           plot_raw_image=plot_raw_image, iou_scores=iou_scores, ax=axes[2])
         axes[2].set_title('Predicted segmentation')
         plt.show()
+        figures.append(fig)
+
         if max_displayed_images is not None and i >= max_displayed_images - 1:
             break
+
+    return figures

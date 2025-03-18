@@ -2,6 +2,7 @@ from typing import Dict, Literal, List
 import torch
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.figure import Figure
 import seaborn as sns
 import copy
 import math
@@ -113,7 +114,7 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
                           max_displayed_images=10, score_threshold=0.2,
                           calc_iou=True, score_decimal=3, iou_decimal=3,
                           colors=None, fill=False, width=1,
-                          font_size=10, figsize=(12, 6)):
+                          font_size=10, figsize=(12, 6)) -> List[Figure]:
     """
     Show minibatch images with predicted bounding boxes.
 
@@ -159,6 +160,7 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
     else:
         score_thresholds = [score_threshold]
     
+    figures = []
     # Iterate over the images
     for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
         # Convert the image from float32 [0, 1] to uint8 [0, 255]
@@ -213,9 +215,12 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
                                 ax=axes[1])
             plt.title(f'Predicted bounding boxes (Score > {score_thresh})')
             plt.show()
+            figures.append(fig)
         
         if max_displayed_images is not None and i >= max_displayed_images - 1:
             break
+
+    return figures
 
 def show_average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]],
                             targets: List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]],
