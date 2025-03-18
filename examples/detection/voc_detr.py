@@ -314,8 +314,8 @@ def convert_preds_targets_to_torchvision(preds, targets):
     # Convert the targets
     targets = [{
         "boxes": box_convert(target["boxes"], 'cxcywh', 'xyxy') \
-                 * torch.tensor([orig[1], orig[0], orig[1], orig[0]], dtype=torch.float32).to(DEVICE) if target["boxes"].shape[0] > 0 \
-                 else torch.zeros(size=(0, 4), dtype=torch.float32).to(DEVICE),
+                 * torch.tensor([orig[1], orig[0], orig[1], orig[0]], dtype=torch.float32) if target["boxes"].shape[0] > 0 \
+                 else torch.zeros(size=(0, 4), dtype=torch.float32),
         "labels": target["class_labels"]
     } for target, orig in zip(targets, orig_target_sizes)]
     # Return as TorchVision format

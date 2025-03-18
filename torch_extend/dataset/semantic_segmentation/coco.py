@@ -58,7 +58,8 @@ class CocoSemanticSegmentation(CocoDetection, SemanticSegOutput):
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         id = self.ids[index]
         image = self._load_image(id)
-        target = self._load_target(id, image.size[1], image.size[0])
+        w, h = image.size
+        target = self._load_target(id, h, w)
         target = Image.fromarray(target)
 
         if self.transforms is not None:

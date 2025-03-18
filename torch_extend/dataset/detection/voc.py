@@ -3,13 +3,12 @@ import torch
 from torchvision.datasets import VisionDataset
 from torchvision.datasets.utils import download_and_extract_archive
 from torchvision.datasets.voc import DATASET_YEAR_DICT
-from torchvision.ops import box_convert
+from transformers import BaseImageProcessor
 import albumentations as A
 import numpy as np
 from PIL import Image
 import collections
 import os
-from transformers import BaseImageProcessor
 import shutil
 
 from xml.etree.ElementTree import Element as ET_Element
@@ -20,6 +19,7 @@ except ImportError:
 
 from .utils import DetectionOutput
 from ...validate.common import validate_same_img_size
+from ...data_converter.detection import convert_image_target_to_transformers
 
 def parse_voc_xml(node: ET_Element) -> Dict[str, Any]:
     """
@@ -135,7 +135,7 @@ class VOCBaseTV(VisionDataset):
 
 class VOCDetection(VOCBaseTV, DetectionOutput):
     """
-    Dataset from Pascal VOC format to Torchvision format with image path
+    Dataset from Pascal VOC format to Torchvision or Transformers format with image path
 
     Parameters
     ----------
@@ -227,7 +227,7 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
     def _convert_target(self, boxes, labels, index):
         """Convert VOC to TorchVision format"""
         # Get the labels
-        labels = torch.tensor(labels, dtype=torch.int64)
+        labels = torch.tensor(labels, dtype=torch.int64) if len(labels) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Convert the bounding boxes
         boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Output as Torchvision format
@@ -236,38 +236,6 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
                   'image_path': self.images_detection[index]}
         return target
     
-    def _convert_target_to_transformers(self, image, image_id, target):
-        """
-        Convert VOC to Transformers format (Reference: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/DETR/Fine_tuning_DetrForObjectDetection_on_custom_dataset_(balloon).ipynb)
-        
-        Returns
-        -------
-        {"pixel_values": torch.Tensor(C, H, W), "pixel_mask": torch.Tensor(H, W), "labels": {"boxes": torch.Tensor(n_instances, 4), "class_labels": torch.Tensor(n_instances), "org_size": Tuple[int, int],...}} with boxes in normalized cxcywh format
-
-        If the output image sizes are different, `processor.pad(pixel_values, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
-        """
-        # format annotations in COCO format
-        annotations = [
-            {
-                "image_id": image_id,
-                "category_id": label.item(),
-                "bbox": box_convert(box, "xyxy", "xywh").tolist(),
-                "iscrowd": 0,
-                "area": (box[2].item() - box[0].item()) * (box[3].item() - box[1].item()),
-            }
-            for box, label in zip(target['boxes'], target['labels'])
-        ]
-        # Apply the Transformers processor
-        encoding = self.processor(images=image,
-                                  annotations={'image_id': image_id, 'annotations': annotations},
-                                  return_tensors="pt")
-        # Remove batch dimension and return as dictionary
-        return {
-            "pixel_values": encoding["pixel_values"].squeeze(),
-            "pixel_mask": encoding["pixel_mask"].squeeze(),
-            "labels": encoding["labels"][0]
-        }
-
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         image = self._load_image(index)
         boxes, labels = self._load_target(index)
@@ -293,5 +261,6 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
             return image, target
 
         # Output as Transformers format
+        # If the output image sizes are different, `processor.pad(pixel_values, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
         elif self.out_fmt == "transformers":
-            return self._convert_target_to_transformers(image, index, target)
+            return convert_image_target_to_transformers(image, target, index, self.processor, out_fmt='detr')

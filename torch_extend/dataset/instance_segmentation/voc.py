@@ -10,7 +10,7 @@ from transformers import BaseImageProcessor
 import xml.etree.ElementTree as ET
 
 from ..detection.voc import VOCDetection
-from ..detection.utils import DetectionOutput
+from ...data_converter.instance_segmentation import convert_image_target_to_transformers
 
 class VOCInstanceSegmentation(VOCDetection):
     """`Pascal VOC <http://host.robots.ox.ac.uk/pascal/VOC/>`_ Instance Segmentation Dataset.
@@ -92,10 +92,10 @@ class VOCInstanceSegmentation(VOCDetection):
         border_mask = (mask == self.border_idx).astype(np.uint8)
         return boxes, labels, masks, border_mask
     
-    def _convert_target(self, boxes, labels, masks, border_mask, index, w, h):
+    def _convert_target(self, boxes, labels, masks, border_mask, index, h, w):
         """Convert VOC to TorchVision format"""
         # Get the labels
-        labels = torch.tensor(labels, dtype=torch.int64) if len(boxes) > 0 else torch.zeros(size=(0,), dtype=torch.int64)
+        labels = torch.tensor(labels, dtype=torch.int64) if len(labels) > 0 else torch.zeros(size=(0,), dtype=torch.int64)
         # Convert the bounding boxes
         boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Convert the instance masks
@@ -116,48 +116,6 @@ class VOCInstanceSegmentation(VOCDetection):
                   'border_mask': border_mask,
                   'image_path': self.images_instance[index]}
         return target
-    
-    def _convert_target_to_transformers(self, image, image_id, target):
-        """
-        Convert VOC to Transformers format
-
-        Returns
-        -------
-        {"pixel_values": torch.Tensor(C, H, W), "pixel_mask": torch.Tensor(H, W), "mask_labels": torch.Tensor(n_instances, H, W), "class_labels": torch.Tensor(n_instances)}
-
-        If the output image sizes are different, `processor.encode_inputs(pixel_values, segmentation_map, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
-        """
-        # Convert instance masks into one mask with instance IDs
-        segmentation_map = torch.zeros_like(target['masks'][0])
-        for i, mask in enumerate(target['masks']):
-            segmentation_map[mask.bool()] = i+1
-        # mapping between instance IDs and class labels
-        inst2class = {i: label for i, label in enumerate([0] + target['labels'].tolist())}
-        # Apply the Transformers processor
-        encoding = self.processor(images=image, segmentation_maps=segmentation_map,
-                                  instance_id_to_semantic_id=inst2class,
-                                  return_tensors="pt")
-        # If images sizes are the same
-        if self.same_img_size:
-            # Remove batch dimension and return as dictionary
-            return {
-                "pixel_values": encoding["pixel_values"].squeeze(),
-                "pixel_mask": encoding["pixel_mask"].squeeze(),
-                "mask_labels": encoding["mask_labels"][0][1:, :, :],  # remove background
-                "class_labels": encoding["class_labels"][0][1:]  # remove background
-            }
-        # If images sizes are different, `processor.encode_inputs(pixel_values, segmentation_map, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
-        else:
-            # Recreate the segmentation map
-            segmentation_map = torch.zeros_like(encoding["pixel_mask"].squeeze())
-            for i, mask in enumerate(encoding["mask_labels"][0][1:, :, :]):
-                segmentation_map[mask.bool()] = i+1
-            # Remove batch dimension and return as dictionary
-            return {
-                "images": encoding["pixel_values"].squeeze(),
-                "segmentation_maps": segmentation_map,
-                "instance_id_to_semantic_id": inst2class
-            }
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         """"""
@@ -175,16 +133,16 @@ class VOCInstanceSegmentation(VOCDetection):
                 transformed = self.transforms(image=np.array(image), bboxes=boxes, class_labels=labels, masks=masks)
                 image = transformed['image']
                 target = self._convert_target(transformed['bboxes'], 
-                                            transformed['class_labels'],
-                                            transformed['masks'],
-                                            border_mask, index, w, h)
+                                              transformed['class_labels'],
+                                              transformed['masks'],
+                                              border_mask, index, h, w)
             # TorchVision transforms
             else:
-                converted_target = self._convert_target(boxes, labels, masks, border_mask, index, w, h)
+                converted_target = self._convert_target(boxes, labels, masks, border_mask, index, h, w)
                 image, target = self.transforms(image, converted_target)
         # No transformation
         else:
-            target = self._convert_target(boxes, labels, masks, border_mask, index, w, h)
+            target = self._convert_target(boxes, labels, masks, border_mask, index, h, w)
         
         # Output as TorchVision format
         if self.out_fmt == "torchvision":
@@ -192,7 +150,7 @@ class VOCInstanceSegmentation(VOCDetection):
 
         # Output as Transformers format
         elif self.out_fmt == "transformers":
-            return self._convert_target_to_transformers(image, index, target)
+            return convert_image_target_to_transformers(image, target, self.processor, self.same_img_size, out_fmt="maskformer")
     
     def get_image_target_path(self, index: int):
         """Get the image and target path of the dataset."""

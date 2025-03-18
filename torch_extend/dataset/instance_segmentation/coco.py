@@ -6,14 +6,14 @@ import albumentations as A
 import numpy as np
 import os
 
+from ..detection.coco import CocoDetection
+from ...data_converter.semantic_segmentation import convert_polygon_to_mask
 from ...data_converter.detection import _convert_bbox_xywh_to_xyxy
-from ...validate.common import validate_same_img_size
-from .utils import DetectionOutput
-from ...data_converter.detection import convert_image_target_to_transformers
+from ...data_converter.instance_segmentation import convert_image_target_to_transformers
 
-class CocoDetection(ds.CocoDetection, DetectionOutput):
+class CocoInstanceSegmentation(CocoDetection):
     """
-    Dataset from COCO format to Torchvision or Transformers format with image path
+    COCO format Instance Segmentation Dataset
 
     Parameters
     ----------
@@ -47,49 +47,32 @@ class CocoDetection(ds.CocoDetection, DetectionOutput):
         reduce_labels: bool = False,
         processor: Optional[BaseImageProcessor] = None
     ) -> None:
-        super().__init__(root, annFile, transform, target_transform, transforms)
-        class_to_idx = {
-            v['name']: v['id']
-            for k, v in self.coco.cats.items()
-        }
-        # Index to class dict
-        self.idx_to_class = {v: k for k, v in class_to_idx.items()}
-        na_cnt = 0
-        for i in range(max(class_to_idx.values())):
-            if i not in class_to_idx.values():
-                na_cnt += 1
-                self.idx_to_class[i] = f'NA{"{:02}".format(na_cnt)}'
-        # Reduce the labels
-        self.reduce_labels = reduce_labels
-        if self.reduce_labels:
-            self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
-        # Class to index dictionary
-        self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
-        # Set the output format
-        self.out_fmt = out_fmt
-        # Set Transformers processor
-        if out_fmt == "transformers":
-            if processor is None:
-                raise ValueError("`processor` must be provided if `out_fmt` is 'transformers'")
-            else:
-                self.processor = processor
-        else:
-            self.processor = None
-        # Chech whether all the image sizes are the same
-        image_transform = self.transforms if self.transforms is not None else self.transform
-        self.same_img_size = validate_same_img_size(image_transform, self.processor)
+        super().__init__(root, annFile, out_fmt, transform, target_transform, transforms, reduce_labels, processor)
 
-    def _load_target(self, id: int) -> List[Any]:
+    def _load_target(self, id: int, height: int, width: int) -> List[Any]:
         target_src = self.coco.loadAnns(self.coco.getAnnIds(id))
         # Get the labels
         labels = [obj['category_id'] for obj in target_src]
         if self.reduce_labels:
             labels = [label-1 for label in labels]
+        # Get the segmentation polygons
+        segmentations = [obj['segmentation'] for obj in target_src]
+        # Convert the polygons to masks
+        masks = convert_polygon_to_mask(segmentations, height, width)
         # Get the bounding boxes
-        boxes = [obj['bbox'] for obj in target_src]
-        return boxes, labels
+        boxes = []
+        for obj, mask in zip(target_src, masks):
+            # If the bounding box exists
+            if len(obj['bbox']) > 0:
+                boxes.append(obj['bbox'])
+            # If the bounding box does not exist, create a bounding box from the mask
+            nonzero_mask = mask.nonzero()
+            boxes.append([nonzero_mask[:, 1].min(), nonzero_mask[:, 0].min(),
+                          nonzero_mask[:, 1].max()-nonzero_mask[:, 1].min(),
+                          nonzero_mask[:, 0].max()-nonzero_mask[:, 0].min()])
+        return boxes, labels, masks
     
-    def _convert_target(self, boxes, labels, id):
+    def _convert_target(self, boxes, labels, masks, id, h, w):
         """Convert COCO to TorchVision format"""
         # Get the labels
         labels = torch.tensor(labels, dtype=torch.int64) if len(labels) > 0 else torch.zeros(size=(0,), dtype=torch.int64)
@@ -97,35 +80,54 @@ class CocoDetection(ds.CocoDetection, DetectionOutput):
         boxes = [[int(k) for k in _convert_bbox_xywh_to_xyxy(*box)]
                   for box in boxes]
         boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
+        # Convert the instance masks
+        masks = torch.stack([mask if isinstance(mask, torch.Tensor) else torch.tensor(mask, dtype=torch.uint8) for mask in masks]) if len(masks) > 0 else torch.zeros(size=(0, h, w), dtype=torch.uint8)
+        # Miscellaneous fields
+        image_id = id
+        area = torch.tensor([mask.sum() for mask in masks], dtype=torch.float32)  # Mask areas
+        iscrowd = torch.zeros((len(masks),), dtype=torch.int64)  # suppose all instances are not crowd
         # Get the image path
         image_path = self.coco.loadImgs(id)[0]["file_name"]
+        target = {'boxes': boxes,
+                  'labels': labels,
+                  'masks': masks,
+                  'image_id': image_id,
+                  'area': area,
+                  'iscrowd': iscrowd,
+                  'image_path': os.path.join(self.root, image_path)}
         target = {'boxes': boxes, 'labels': labels, 'image_path': os.path.join(self.root, image_path)}
         return target
     
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
-
+        """"""
         if not isinstance(index, int):
             raise ValueError(f"Index must be of type integer, got {type(index)} instead.")
 
         id = self.ids[index]
         image = self._load_image(id)
-        boxes, labels = self._load_target(id)
+        w, h = image.size
+        boxes, labels, masks = self._load_target(id, h, w)
+        if len(masks) == 0:  # masks cannot be empty in Albumentations, so we add a dummy mask
+            print('Warning: Empty masks found, creating dummy masks')
+            masks = [np.zeros((h, w), dtype=np.uint8)]
 
         # Apply transforms
         if self.transforms is not None:
             # Albumentation transforms
             if isinstance(self.transforms, A.Compose):
-                transformed = self.transforms(image=np.array(image), bboxes=boxes, class_labels=labels)
+                transformed = self.transforms(image=np.array(image), bboxes=boxes, class_labels=labels, masks=masks)
                 image = transformed['image']
                 target = self._convert_target(transformed['bboxes'], 
-                                              transformed['class_labels'], id)
+                                              transformed['class_labels'],
+                                              transformed['masks'],
+                                              id, h, w)
             # TorchVision transforms
             else:
-                converted_target = self._convert_target(boxes, labels, id)
+                converted_target = self._convert_target(boxes, labels, masks, id, h, w)
                 image, target = self.transforms(image, converted_target)
         # No transformation
         else:
-            target = self._convert_target(boxes, labels, id)
+            target = self._convert_target(boxes, labels, masks, id, h, w)
 
         # Output as TorchVision format
         if self.out_fmt == "torchvision":

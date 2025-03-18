@@ -140,6 +140,61 @@ def convert_target(target, in_fmt, out_fmt, class_to_idx=None,
         ]
     return converted_target
 
+def convert_image_target_to_transformers(image, target, image_id, processor, out_fmt='detr'):
+    """
+    Convert image and target from TorchVision to Transformers format (Reference: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/DETR/Fine_tuning_DetrForObjectDetection_on_custom_dataset_(balloon).ipynb)
+
+    Parameters
+    ----------
+    image : Dict
+        Source image data with TorchVision format torch.Tensor(C, H, W)
+
+    target : Dict
+        Source target data with TorchVision format
+
+        {'boxes': torch.Tensor([[xmin1, ymin1, xmax1, ymax1],..]), 'labels': torch.Tensor([labelindex1, labelindex2,..])}
+
+    image_id : int
+        Image ID
+
+    processor : BaseImageProcessor
+        The processor for the Transformers object detection model
+
+    out_fmt : Literal['detr']
+        Format of the output data. 
+        
+        'detr' is the format for the `DetrForObjectDetection` model.
+    
+    Returns
+    -------
+    item: Dict
+        Output data in the Transformers object detection format
+        
+        detr: {"pixel_values": torch.Tensor(C, H, W), "pixel_mask": torch.Tensor(H, W), "labels": {"boxes": torch.Tensor(n_instances, 4), "class_labels": torch.Tensor(n_instances), "org_size": Tuple[int, int],...}} with boxes in normalized cxcywh format.
+    """
+    if out_fmt == 'detr':
+        # format annotations in COCO format
+        annotations = [
+            {
+                "image_id": image_id,
+                "category_id": label.item(),
+                "bbox": box_convert(box, "xyxy", "xywh").tolist(),
+                "iscrowd": 0,
+                "area": (box[2].item() - box[0].item()) * (box[3].item() - box[1].item()),
+            }
+            for box, label in zip(target['boxes'], target['labels'])
+        ]
+        # Apply the Transformers processor
+        encoding = processor(images=image,
+                            annotations={'image_id': image_id, 'annotations': annotations},
+                            return_tensors="pt")
+        # Remove batch dimension and return as dictionary
+        return {
+            "pixel_values": encoding["pixel_values"].squeeze(),
+            "pixel_mask": encoding["pixel_mask"].squeeze(),
+            "labels": encoding["labels"][0]
+        }
+
 def convert_batch_to_torchvision(batch, in_fmt='transformers'):
     """
     Convert the batch to the torchvision format images and targets
