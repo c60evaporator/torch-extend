@@ -33,10 +33,6 @@ class VOCInstanceSegmentation(VOCDetection):
         A function/transform that takes in the target and transforms it.
     transforms : callable, optional
         A function/transform that takes input sample and its target as entry and returns a transformed version.
-    reduce_labels : bool
-        If True, the label 0 is regarded as the background and all the labels will be reduced by 1. Also, the class_to_idx will
-
-        For example, if the labels are [1, 3] and the class_to_idx is {1: 'aeroplane', 2: 'bicycle', 3: 'bird'}, the labels will be [0, 2] and the class_to_idx will be {0: 'aeroplane', 1: 'bicycle', 2: 'bird'}.
     processor : callable, optional
         An image processor instance for HuggingFace Transformers. Only available if ``out_fmt="transformers"``. 
     border_idx : int
@@ -53,13 +49,12 @@ class VOCInstanceSegmentation(VOCDetection):
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
         transforms: Optional[Callable] = None,
-        reduce_labels: bool = False,
         processor: Optional[BaseImageProcessor] = None,
         border_idx: int = 255,
     ):
         super().__init__(root, idx_to_class, out_fmt, image_set, download,
                          transform, target_transform, transforms,
-                         reduce_labels, processor)
+                         False, processor)
         self.border_idx = border_idx
 
     def __len__(self) -> int:
@@ -150,7 +145,8 @@ class VOCInstanceSegmentation(VOCDetection):
 
         # Output as Transformers format
         elif self.out_fmt == "transformers":
-            return convert_image_target_to_transformers(image, target, self.processor, self.same_img_size, out_fmt="maskformer")
+            return convert_image_target_to_transformers(image, target, self.processor, self.same_img_size, 
+                                                        out_fmt="maskformer")
     
     def get_image_target_path(self, index: int):
         """Get the image and target path of the dataset."""

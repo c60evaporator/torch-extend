@@ -32,6 +32,9 @@ LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
+DICE_WEIGHT = 1.0
+CROSS_ENTROPY_WEIGHT = 1.0
+MASK_WEIGHT = 20.0
 # Specify the model name from the Hugging Face Model Hub (https://huggingface.co/models?sort=downloads&search=maskformer)
 # Reference https://github.com/facebookresearch/MaskFormer/blob/main/MODEL_ZOO.md
 MODEL_NAME = 'facebook/maskformer-swin-base-ade'
@@ -90,15 +93,12 @@ from transformers import MaskFormerImageProcessor
 import albumentations as A
 import numpy as np
 
-# Note: ADE Normalization
-ADE_MEAN = (np.array([123.675, 116.280, 103.530]) / 255).tolist()
-ADE_STD = (np.array([58.395, 57.120, 57.375]) / 255).tolist()
-
+REDUCE_LABELS = False
 # Image Processor
-image_processor = MaskFormerImageProcessor.from_pretrained(MODEL_NAME)
+image_processor = MaskFormerImageProcessor.from_pretrained(MODEL_NAME, do_reduce_labels=REDUCE_LABELS,
+                                                           ignore_index=255 if REDUCE_LABELS else 0,
+                                                           size={'height': 512, 'width': 512})
 # image_processor = MaskFormerImageProcessor(reduce_labels=True, ignore_index=255, do_resize=False, do_rescale=False, do_normalize=False)
-# Resize to (512, 512)
-image_processor.size = {'height': 512, 'width': 512}
 
 # Augmentation
 # Transforms for training
@@ -134,9 +134,11 @@ val_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='val',
                                       out_fmt='transformers', processor=image_processor)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
-num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
+if REDUCE_LABELS:
+    idx_to_class = {k-1: v for k, v in idx_to_class.items()}
+    class_to_idx = {v: k for k, v in idx_to_class.items()}
 
 # Collate function for the DataLoader 
 def collate_fn(batch):
@@ -199,6 +201,7 @@ def show_image_and_target(img, target, ax=None):
     show_instance_masks(img, masks=masks, boxes=boxes,
                         border_mask=target['border_mask'] if 'border_mask' in target else None,
                         labels=labels,
+                        bg_idx=None if REDUCE_LABELS else 0,
                         idx_to_class=idx_to_class, ax=ax)
 
 train_iter = iter(train_dataloader)
@@ -215,7 +218,10 @@ from transformers import MaskFormerConfig, MaskFormerForInstanceSegmentation
 # Load the model
 model = MaskFormerForInstanceSegmentation.from_pretrained(MODEL_NAME,
                                                           id2label=idx_to_class,
-                                                          ignore_mismatched_sizes=True)
+                                                          ignore_mismatched_sizes=True,
+                                                          dice_weight=DICE_WEIGHT,
+                                                          cross_entropy_weight=CROSS_ENTROPY_WEIGHT,
+                                                          mask_weight=MASK_WEIGHT)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
@@ -349,6 +355,7 @@ def get_targets_cpu(targets):
 def plot_predictions(imgs, preds, targets, n_images=4):
     figures = show_predicted_instances(imgs, preds, targets, idx_to_class,
                                        border_mask=targets['border_mask'] if 'border_mask' in targets else None,
+                                       bg_idx=None if REDUCE_LABELS else 0,
                                        max_displayed_images=n_images)
     return figures
 

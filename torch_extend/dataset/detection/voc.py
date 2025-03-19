@@ -227,7 +227,7 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
     def _convert_target(self, boxes, labels, index):
         """Convert VOC to TorchVision format"""
         # Get the labels
-        labels = torch.tensor(labels, dtype=torch.int64) if len(labels) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
+        labels = torch.tensor(labels, dtype=torch.int64) if len(labels) > 0 else torch.zeros(size=0, dtype=torch.int64)
         # Convert the bounding boxes
         boxes = torch.tensor(boxes, dtype=torch.float32) if len(boxes) > 0 else torch.zeros(size=(0, 4), dtype=torch.float32)
         # Output as Torchvision format

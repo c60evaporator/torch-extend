@@ -13,10 +13,12 @@ from ..metrics import detection as det_metrics
 from ..metrics import instance_segmentation as inst_metrics
 from . import semantic_segmentation as semseg
 
-def _convert_masks_to_seg_mask(image, masks, labels, border_mask=None):
+def _convert_masks_to_seg_mask(image, masks, labels, border_mask=None, bg_idx=0, border_idx=255):
     """Convert instance masks to a single segmentation mask."""
-    seg_mask = torch.zeros_like(image[0, :, :], dtype=torch.int64)
-    accumulated_mask = torch.zeros_like(image[0, :, :], dtype=torch.int64)
+    if bg_idx is None:
+        bg_idx = -1
+    seg_mask = torch.full_like(image[0, :, :], bg_idx, dtype=torch.int64)
+    accumulated_mask = torch.full_like(image[0, :, :], bg_idx, dtype=torch.int64)
     for mask, label in zip(masks, labels):
         seg_mask.masked_fill_(mask.bool(), label)
         accumulated_mask += mask
@@ -25,17 +27,19 @@ def _convert_masks_to_seg_mask(image, masks, labels, border_mask=None):
     seg_mask.masked_fill_(occulded_mask, 254)
     # border
     if border_mask is not None:
-        seg_mask.masked_fill_(border_mask.bool(), 255)
+        seg_mask.masked_fill_(border_mask.bool(), border_idx)
     return seg_mask
 
 def show_instance_masks(image, masks, boxes=None,
                         border_mask=None,
                         labels=None, idx_to_class=None,
+                        bg_idx=0, border_idx=255,
                         mask_ious=None, box_ious=None, iou_decimal=3,
                         scores=None, score_decimal=3,
                         colors=None, fill=False, width=1,
                         font_size=10, text_color=None,
                         alpha=0.4, add_legend=True,
+                        bg_color=[255, 255, 255], border_color=[0, 0, 0], occlusion_color=[64, 64, 64],
                         ax=None):
     """
     Show the image with the masks and bounding boxes for Instance Segmentation.
@@ -55,6 +59,10 @@ def show_instance_masks(image, masks, boxes=None,
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
         If None, class ID is used for the plot
+    bg_idx : int
+        The index of the background in the target mask.
+    border_idx : int
+        The index of the border in the target mask.
     mask_ious : List[float]
         IoUs of the masks. If None, IoUs are not displayed.
     box_ious : List[float]
@@ -80,6 +88,12 @@ def show_instance_masks(image, masks, boxes=None,
         Transparency of the segmentation mask
     add_legend : bool
         If True, the legend of the segmentation labels is added to the plot
+    bg_color : List[int]
+        The color of the background described in [R, G, B]
+    border_color : List[int]
+        The color of the border described in [R, G, B]
+    occlusion_color : List[int]
+        The color of the occlusion described in [R, G, B]
     ax : matplotlib axes, default=None
         Axes object to plot on. If `None`, a new figure and axes is created.
     """
@@ -111,11 +125,13 @@ def show_instance_masks(image, masks, boxes=None,
     # Generate a color palette for the segmentation mask
     palette = semseg.create_segmentation_palette(colors)
     # Convert instance masks to single mask
-    seg_mask = _convert_masks_to_seg_mask(image, masks, labels, border_mask)
+    seg_mask = _convert_masks_to_seg_mask(image, masks, labels, border_mask, bg_idx, border_idx)
     # Show the mask
-    segmentation_img = semseg.array1d_to_pil_image(seg_mask, palette, 
-                                                   bg_idx=0, border_idx=255,
-                                                   occlusion_idx=254)
+    segmentation_img = semseg.array1d_to_pil_image(seg_mask, palette,
+                                                   bg_idx=bg_idx, border_idx=border_idx,
+                                                   occlusion_idx=254,
+                                                   bg_color=bg_color, border_color=border_color,
+                                                   occlusion_color=occlusion_color)
     ax.imshow(segmentation_img, alpha=alpha)
     # Show IoUs
     if mask_ious is not None:
@@ -153,6 +169,7 @@ def show_instance_masks(image, masks, boxes=None,
         ax.legend(handles=handles)
 
 def show_predicted_instances(imgs, preds, targets, idx_to_class,
+                             bg_idx=0, border_idx=255,
                              border_mask=None, separate_boxes=False,
                              max_displayed_images=10, score_threshold=0.2,
                              calc_iou=True, score_decimal=3, iou_decimal=3,
@@ -176,6 +193,10 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
         [{'boxes': Tensor([[xmin1, ymin1, xmax1, ymax1],..]), 'masks': Tensor([mask1,..]), 'labels': Tensor([labelindex1,..])}]
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
+    bg_idx : int
+        The index of the background in the target mask.
+    border_idx : int
+        The index of the border in the target mask.
     border_mask : torch.Tensor (H, W)
         Border mask
     separate_boxes : bool
@@ -252,11 +273,12 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
                                 boxes=None if separate_boxes else boxes_true,
                                 border_mask=border_mask,
                                 labels=labels_true, idx_to_class=idx_to_class_uk,
+                                bg_idx=bg_idx, border_idx=border_idx,
                                 colors=colors, fill=fill, width=width,
                                 font_size=font_size, text_color=text_color, alpha=alpha,
                                 ax=axes[0][0] if separate_boxes else axes[0])
             if separate_boxes:
-                det.show_bounding_boxes(img, boxes_true, 
+                det.show_bounding_boxes(img, boxes_true,
                                         labels=labels, idx_to_class=idx_to_class,
                                         colors=colors, fill=fill, width=width,
                                         font_size=font_size, text_color=text_color,
@@ -296,6 +318,7 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
                                 boxes=None if separate_boxes else boxes_confident,
                                 scores=scores_confident, score_decimal=score_decimal,
                                 labels=torch.tensor(labels_confident), idx_to_class=idx_to_class_uk,
+                                bg_idx=bg_idx, border_idx=border_idx,
                                 mask_ious=mask_ious,
                                 box_ious=box_ious if separate_boxes else None,
                                 iou_decimal=iou_decimal,

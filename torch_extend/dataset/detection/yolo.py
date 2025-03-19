@@ -88,7 +88,7 @@ class YoloDetection(VisionDataset, DetectionOutput):
     def _convert_target(self, boxes, labels, index: int, w: int, h: int):
         """Convert COCO to TorchVision format"""
         # Get the labels
-        labels = torch.tensor(labels, dtype=torch.int64)
+        labels = torch.tensor(labels, dtype=torch.int64) if len(labels) > 0 else torch.zeros(size=0, dtype=torch.int64)
         # Convert the bounding boxes from [x_c, y_c, w, h] to [xmin, ymin, xmax, ymax]
         boxes = [[int(k) for k in _convert_bbox_centerxywh_to_xyxy(*box)]
                   for box in boxes]

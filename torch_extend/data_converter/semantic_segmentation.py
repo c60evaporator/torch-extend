@@ -8,7 +8,7 @@ def convert_polygon_to_mask(segmentations, height, width):
     """
     masks = []
     for polygons in segmentations:
-        polygons = [np.array(polygons).ravel().tolist()]
+        #polygons = [np.array(polygons).ravel().tolist()]
         rles = coco_mask.frPyObjects(polygons, height, width)
         mask = coco_mask.decode(rles)
         if len(mask.shape) < 3:

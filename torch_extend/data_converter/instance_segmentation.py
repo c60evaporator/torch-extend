@@ -51,8 +51,8 @@ def convert_image_target_to_transformers(image, target, processor, same_img_size
             return {
                 "pixel_values": encoding["pixel_values"].squeeze(),
                 "pixel_mask": encoding["pixel_mask"].squeeze(),
-                "mask_labels": encoding["mask_labels"][0][1:, :, :],  # remove background
-                "class_labels": encoding["class_labels"][0][1:]  # remove background
+                "mask_labels": encoding["mask_labels"][0],
+                "class_labels": encoding["class_labels"][0]
             }
         # If images sizes are different, `processor.encode_inputs(pixel_values, segmentation_map, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
         else:

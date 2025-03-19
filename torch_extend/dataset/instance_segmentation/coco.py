@@ -29,10 +29,6 @@ class CocoInstanceSegmentation(CocoDetection):
         A function/transform that takes in the target and transforms it.
     transforms : callable, optional
         A function/transform that takes input sample and its target as entry and returns a transformed version.
-    reduce_labels : bool
-        If True, the label 0 is regarded as the background and all the labels will be reduced by 1. Also, the class_to_idx will
-
-        For example, if the labels are [1, 3] and the class_to_idx is {1: 'aeroplane', 2: 'bicycle', 3: 'bird'}, the labels will be [0, 2] and the class_to_idx will be {0: 'aeroplane', 1: 'bicycle', 2: 'bird'}.
     processor : callable, optional
         An image processor instance for HuggingFace Transformers. Only available if ``out_fmt="transformers"``.
     """
@@ -44,21 +40,19 @@ class CocoInstanceSegmentation(CocoDetection):
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
         transforms: Optional[Callable] = None,
-        reduce_labels: bool = False,
         processor: Optional[BaseImageProcessor] = None
     ) -> None:
-        super().__init__(root, annFile, out_fmt, transform, target_transform, transforms, reduce_labels, processor)
+        super().__init__(root, annFile, out_fmt, transform, target_transform, transforms, False, processor)
 
     def _load_target(self, id: int, height: int, width: int) -> List[Any]:
         target_src = self.coco.loadAnns(self.coco.getAnnIds(id))
         # Get the labels
         labels = [obj['category_id'] for obj in target_src]
-        if self.reduce_labels:
-            labels = [label-1 for label in labels]
         # Get the segmentation polygons
         segmentations = [obj['segmentation'] for obj in target_src]
         # Convert the polygons to masks
         masks = convert_polygon_to_mask(segmentations, height, width)
+        masks = np.stack(masks, axis=0) if len(masks) > 0 else np.zeros((0, height, width), dtype=np.uint8)
         # Get the bounding boxes
         boxes = []
         for obj, mask in zip(target_src, masks):
@@ -66,10 +60,11 @@ class CocoInstanceSegmentation(CocoDetection):
             if len(obj['bbox']) > 0:
                 boxes.append(obj['bbox'])
             # If the bounding box does not exist, create a bounding box from the mask
-            nonzero_mask = mask.nonzero()
-            boxes.append([nonzero_mask[:, 1].min(), nonzero_mask[:, 0].min(),
-                          nonzero_mask[:, 1].max()-nonzero_mask[:, 1].min(),
-                          nonzero_mask[:, 0].max()-nonzero_mask[:, 0].min()])
+            else:
+                nonzero_mask = mask.nonzero()
+                boxes.append([nonzero_mask[:, 1].min(), nonzero_mask[:, 0].min(),
+                            nonzero_mask[:, 1].max()-nonzero_mask[:, 1].min(),
+                            nonzero_mask[:, 0].max()-nonzero_mask[:, 0].min()])
         return boxes, labels, masks
     
     def _convert_target(self, boxes, labels, masks, id, h, w):
@@ -95,7 +90,6 @@ class CocoInstanceSegmentation(CocoDetection):
                   'area': area,
                   'iscrowd': iscrowd,
                   'image_path': os.path.join(self.root, image_path)}
-        target = {'boxes': boxes, 'labels': labels, 'image_path': os.path.join(self.root, image_path)}
         return target
     
     def __getitem__(self, index: int) -> Tuple[Any, Any]:

@@ -31,7 +31,8 @@ def create_segmentation_palette(colors=None):
     return palette
 
 def array1d_to_pil_image(array: torch.Tensor, palette: List[List[int]], 
-                         bg_idx=None, border_idx=None, occlusion_idx=None):
+                         bg_idx=None, border_idx=None, occlusion_idx=None,
+                         bg_color=[255, 255, 255], border_color=[0, 0, 0], occlusion_color=[64, 64, 64]):
     """
     Convert 1D class image to colored PIL image
 
@@ -41,22 +42,28 @@ def array1d_to_pil_image(array: torch.Tensor, palette: List[List[int]],
         Input image whose value indicate the class label
     palette : List ([[R1, G1, B1], [R2, G2, B2],..])
         Color palette for specifying the classes
-    border_idx : int
-        The index of the border in the target mask.
     bg_idx : int
         The index of the background in the target mask.
+    border_idx : int
+        The index of the border in the target mask.
     occlusion_idx : int
         The index of the occlusion in the target mask (for Instance Segmentation).
+    bg_color : List[int]
+        The color of the background described in [R, G, B]
+    border_color : List[int]
+        The color of the border described in [R, G, B]
+    occlusion_color : List[int]
+        The color of the occlusion described in [R, G, B]
     """
     # Replace the background
     if bg_idx is not None:
-        palette[bg_idx] = [255, 255, 255]
+        palette[bg_idx] = bg_color
     # Replace the border
     if border_idx is not None:
-        palette[border_idx] = [0, 0, 0]
+        palette[border_idx] = border_color
     # Replace the occlusion
     if occlusion_idx is not None:
-        palette[occlusion_idx] = [64, 64, 64]
+        palette[occlusion_idx] = occlusion_color
     # Convert the array from torch.tensor to np.ndarray
     array_numpy = array.detach().to('cpu').numpy().astype(np.uint8)
     # Convert the array

@@ -12,14 +12,14 @@ sys.path.append(ROOT)
 
 # General Parameters
 EPOCHS = 1
-BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in unstable training and bad for Batch Normalization.
+BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
-DATA_ROOT = './datasets/COCO'
+DATA_ROOT = '../detection/datasets/COCO'
 # Optimizer Parameters
 OPT_NAME = 'sgd'
-LR = 0.01
-WEIGHT_DECAY = 0
-MOMENTUM = 0  # For SGD and RMSprop
+LR = 0.005
+WEIGHT_DECAY = 0.0005
+MOMENTUM = 0.9  # For SGD and RMSprop
 RMSPROP_ALPHA = 0.99  # For RMSprop
 EPS = 1e-8  # For RMSprop, Adam, and AdamW
 ADAM_BETAS = (0.9, 0.999)  # For Adam and AdamW
@@ -31,11 +31,11 @@ LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
-MODEL_NAME = 'fasterrcnn_resnet50_fpn'
+MODEL_NAME = 'maskrcnn_resnet50_fpn'
 
 # Log Parameters
 MLFLOW_TRACKING_URI = './log/mlruns'
-MLFLOW_EXPERIMENT_NAME = 'coco_detection'
+MLFLOW_EXPERIMENT_NAME = 'voc_instance'
 MLFLOW_ARTIFACT_LOCATION = None
 
 # Start MLFlow experiment run
@@ -85,16 +85,12 @@ torch.manual_seed(42)
 ###### 2. Define the transforms ######
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-
-# Note: ImageNet Normalization is not needed for TorchVision Faster R-CNN
-# IMAGENET_MEAN = [0.485, 0.456, 0.406]
-# IMAGENET_STD = [0.229, 0.224, 0.225]
+# Note: ImageNet Normalization is not needed for TorchVision Mask R-CNN
 NORM_MEAN = [0.0, 0.0, 0.0]
 NORM_STD = [1.0, 1.0, 1.0]
 
 # Transforms for training
 train_transform = A.Compose([
-    A.Resize(640, 640),  # Resize the image to (640, 640)
     A.Normalize(NORM_MEAN, NORM_STD),  # Normalization from uint8 [0, 255] to float32 [0.0, 1.0]
     ToTensorV2(),  # Convert from numpy.ndarray to torch.Tensor
 ], bbox_params=A.BboxParams(format='coco', label_fields=['class_labels']))
@@ -116,18 +112,18 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import CocoDetection
-from torch_extend.display.detection import show_bounding_boxes
+from torch_extend.dataset import CocoInstanceSegmentation
+from torch_extend.display.instance_segmentation import show_instance_masks
 
 # Dataset
-TRAIN_ANNFILE='./datasets/COCO/instances_train_filtered.json'
-VAL_ANNFILE='./datasets/COCO/instances_val_filtered.json'
-train_dataset = CocoDetection(
+TRAIN_ANNFILE='../detection/datasets/COCO/instances_train_filtered.json'
+VAL_ANNFILE='../detection/datasets/COCO/instances_val_filtered.json'
+train_dataset = CocoInstanceSegmentation(
     f'{DATA_ROOT}/train2017',
     annFile=TRAIN_ANNFILE,
-    transforms=train_transform
+    transforms=train_transform,
 )
-val_dataset = CocoDetection(
+val_dataset = CocoInstanceSegmentation(
     f'{DATA_ROOT}/val2017',
     annFile=VAL_ANNFILE,
     transforms=eval_transform
@@ -137,11 +133,6 @@ class_to_idx = train_dataset.class_to_idx
 num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
-na_cnt = 0
-for i in range(max(class_to_idx.values())):
-    if i not in class_to_idx.values():
-        na_cnt += 1
-        idx_to_class[i] = f'NA{"{:02}".format(na_cnt)}'
 
 # Dataloader
 def collate_fn(batch):
@@ -150,7 +141,7 @@ train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE,
                               shuffle=True, num_workers=NUM_WORKERS,
                               collate_fn=collate_fn)
 val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
-                            shuffle=True, num_workers=NUM_WORKERS,
+                            shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=collate_fn)
 
 # Denormalize the image
@@ -170,40 +161,40 @@ def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
     # Denormalize the image
     img = denormalize_image(img, train_transform)
-    # Show the image
-    img = (img*255).to(torch.uint8)  # Change from float[0, 1] to uint[0, 255]
-    boxes, labels = target['boxes'], target['labels']
-    show_bounding_boxes(img, boxes, labels=labels,
+    # Show the image and target
+    img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
+    boxes, labels, masks = target['boxes'], target['labels'], target['masks']
+    show_instance_masks(img, masks=masks, boxes=boxes,
+                        border_mask=target['border_mask'] if 'border_mask' in target else None,
+                        labels=labels,
                         idx_to_class=idx_to_class, ax=ax)
 
 train_iter = iter(train_dataloader)
 imgs, targets = next(train_iter)
 for i, (img, target) in enumerate(zip(imgs, targets)):
-    # Show the image and target
     show_image_and_target(img, target)
     plt.show()
 
 # %% Define the model
 ###### 4. Define the model ######
-from torchvision.models.detection import faster_rcnn
+from torchvision.models.detection import mask_rcnn, faster_rcnn
 
-if MODEL_NAME == 'fasterrcnn_resnet50_fpn':
-    model = faster_rcnn.fasterrcnn_resnet50_fpn(weights=faster_rcnn.FasterRCNN_ResNet50_FPN_Weights.COCO_V1)
-elif MODEL_NAME == 'fasterrcnn_resnet50_fpn_v2':
-    model = faster_rcnn.fasterrcnn_resnet50_fpn_v2(weights=faster_rcnn.FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1)
-elif MODEL_NAME == 'fasterrcnn_mobilenet_v3_large_320_fpn':
-    model = faster_rcnn.fasterrcnn_mobilenet_v3_large_320_fpn(weights=faster_rcnn.FasterRCNN_MobileNet_V3_Large_320_FPN_Weights.COCO_V1)
-elif MODEL_NAME == 'fasterrcnn_mobilenet_v3_large_fpn':
-    model = faster_rcnn.fasterrcnn_mobilenet_v3_large_fpn(weights=faster_rcnn.FasterRCNN_MobileNet_V3_Large_FPN_Weights.COCO_V1)
+if MODEL_NAME == 'maskrcnn_resnet50_fpn':
+    model = mask_rcnn.maskrcnn_resnet50_fpn(weights=mask_rcnn.MaskRCNN_ResNet50_FPN_Weights.COCO_V1)
+elif MODEL_NAME == 'maskrcnn_resnet50_fpn_v2':
+    model = mask_rcnn.maskrcnn_resnet50_fpn_v2(weights=mask_rcnn.MaskRCNN_ResNet50_FPN_V2_Weights.COCO_V1)
 else:
     raise ValueError(f"Invalid model name: {MODEL_NAME}")
 
 # Freeze the parameters
 for name, param in model.named_parameters():
     param.requires_grad = False
-# Replace layers for transfer learning
+# Replace layers for transfer learning (https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#object-detection-and-instance-segmentation-model-for-pennfudan-dataset)
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
+in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
+hidden_layer = 256
+model.roi_heads.mask_predictor = mask_rcnn.MaskRCNNPredictor(in_features_mask, hidden_layer, num_classes)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
@@ -246,12 +237,12 @@ import cv2
 import numpy as np
 import io
 
-from torch_extend.display.detection import show_predicted_bboxes
+from torch_extend.display.instance_segmentation import show_predicted_instances
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
     inputs = [img.to(device) for img in batch[0]]
-    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
+    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items() if k in ['boxes', 'labels', 'masks']}
                 for t in batch[1]]
     outputs = model(inputs, targets)
     return criterion(outputs)
@@ -272,6 +263,10 @@ def calc_val_loss(preds, targets, criterion):
 
 def convert_preds_targets_to_torchvision(preds, targets):
     """Convert the predictions and targets to TorchVision format"""
+    # Mask float32(N, 1, H, W) -> uint8(N, H, W)
+    preds = [{k: torch.round(v.squeeze(1)).to(torch.uint8)
+              if k == 'masks' else v for k, v in pred.items()}
+             for pred in preds]
     return preds, targets
 
 def convert_images_to_torchvision(batch):
@@ -288,8 +283,9 @@ def get_targets_cpu(targets):
             for target in targets]
 
 def plot_predictions(imgs, preds, targets, n_images=4):
-    figures = show_predicted_bboxes(imgs, preds, targets, idx_to_class,
-                                    max_displayed_images=n_images)
+    figures = show_predicted_instances(imgs, preds, targets, idx_to_class,
+                                       border_mask=targets['border_mask'] if 'border_mask' in targets else None,
+                                       max_displayed_images=n_images)
     return figures
 
 def validation_step(batch, batch_idx, device, model, criterion,
@@ -322,16 +318,16 @@ def validation_step(batch, batch_idx, device, model, criterion,
 
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
-    # Calculate the mean Average Precision
-    map_metric = MeanAveragePrecision(iou_type=["bbox"], class_metrics=True, extended_summary=True)
+    # Calculate the Mean Average Precision
+    map_metric = MeanAveragePrecision(iou_type=["bbox", "segm"], class_metrics=True, extended_summary=True)
     map_metric.update(preds, targets)
     map_score = map_metric.compute()
     global last_preds
     global last_targets
     last_preds = preds
     last_targets = targets
-    print(f'BoxAP_50-95={map_score["map"].item()}, BoxAP_50={map_score["map_50"].item()}, BoxAP_75={map_score["map_75"].item()}')
-    return {'BoxAP_50-95': map_score["map"].item(), 'BoxAP_50': map_score["map_50"].item(), 'BoxAP_75': map_score["map_75"].item()}
+    print(f'MaskAP_50-95={map_score["segm_map"].item()}, MaskAP_50={map_score["segm_map_50"].item()}, BoxAP_50-95={map_score["bbox_map"].item()}, BoxAP_50={map_score["bbox_map_50"].item()}')
+    return {'MaskAP_50-95': map_score["segm_map"].item(), 'MaskAP_50': map_score["segm_map_50"].item(), 'BoxAP_50-95': map_score["bbox_map"].item(), 'BoxAP_50': map_score["bbox_map_50"].item()}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -382,7 +378,7 @@ start = time.time()
 for i_epoch in range(EPOCHS):
     # Train one epoch
     train_step_losses = train_one_epoch(train_dataloader, device, model,
-                                         criterion, optimizer, lr_scheduler)
+                                        criterion, optimizer, lr_scheduler)
     # Calculate the average loss
     train_loss_epoch = sum(train_step_losses) / len(train_step_losses)
     train_epoch_losses.append(train_loss_epoch)
@@ -434,8 +430,6 @@ fig.tight_layout()
 plt.show()
 
 #%% Plot predicted bounding boxes in the first minibatch of the validation dataset
-from torch_extend.display.detection import show_predicted_bboxes
-
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
@@ -443,8 +437,10 @@ preds, targets = val_predict((imgs, targets), device, model)
 imgs = [denormalize_image(img, eval_transform) for img in imgs]
 plot_predictions(imgs, preds, targets)
 
-#%% Plot Average Precisions
-# Plot Average Precisions
+#%% Plot Box Average Precisions
+# Plot Box Average Precisions
 from torch_extend.display.detection import show_average_precisions
 
 show_average_precisions(last_preds, last_targets, idx_to_class)
+
+# %%

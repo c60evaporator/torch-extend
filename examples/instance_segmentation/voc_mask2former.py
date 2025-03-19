@@ -31,6 +31,9 @@ LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
+DICE_WEIGHT = 5.0
+CROSS_ENTROPY_WEIGHT = 2.0
+MASK_WEIGHT = 5.0
 # Specify the model name from the Hugging Face Model Hub (https://huggingface.co/models?sort=downloads&search=mask2former)
 # Reference https://github.com/facebookresearch/Mask2Former/blob/main/MODEL_ZOO.md
 MODEL_NAME = 'facebook/mask2former-swin-small-coco-instance'  
@@ -88,8 +91,10 @@ torch.manual_seed(42)
 from transformers import AutoImageProcessor, Mask2FormerImageProcessor
 import albumentations as A
 
+REDUCE_LABELS = False
 # Image Processor (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
-image_processor = Mask2FormerImageProcessor.from_pretrained(MODEL_NAME)
+image_processor = Mask2FormerImageProcessor.from_pretrained(MODEL_NAME, do_reduce_labels=REDUCE_LABELS,
+                                                            ignore_index=255 if REDUCE_LABELS else 0)
 
 # Augmentation (Resize, Normalize, and ToTensor are not needed because the image_processor does it)
 # Transforms for training
@@ -128,6 +133,9 @@ class_to_idx = train_dataset.class_to_idx
 num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
+if REDUCE_LABELS:
+    idx_to_class = {k-1: v for k, v in idx_to_class.items()}
+    class_to_idx = {v: k for k, v in idx_to_class.items()}
 
 # Collate function for the DataLoader 
 def collate_fn(batch):
@@ -190,6 +198,7 @@ def show_image_and_target(img, target, ax=None):
     show_instance_masks(img, masks=masks, boxes=boxes,
                         border_mask=target['border_mask'] if 'border_mask' in target else None,
                         labels=labels,
+                        bg_idx=None if REDUCE_LABELS else 0,
                         idx_to_class=idx_to_class, ax=ax)
 
 train_iter = iter(train_dataloader)
@@ -206,7 +215,10 @@ from transformers import Mask2FormerConfig, Mask2FormerForUniversalSegmentation
 # Load the model
 model = Mask2FormerForUniversalSegmentation.from_pretrained(MODEL_NAME,
                                                             id2label=idx_to_class,
-                                                            ignore_mismatched_sizes=True)
+                                                            ignore_mismatched_sizes=True,
+                                                            dice_weight=DICE_WEIGHT,
+                                                            cross_entropy_weight=CROSS_ENTROPY_WEIGHT,
+                                                            mask_weight=MASK_WEIGHT)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
@@ -341,6 +353,7 @@ def get_targets_cpu(targets):
 def plot_predictions(imgs, preds, targets, n_images=4):
     figures = show_predicted_instances(imgs, preds, targets, idx_to_class,
                                        border_mask=targets['border_mask'] if 'border_mask' in targets else None,
+                                       bg_idx=None if REDUCE_LABELS else 0,
                                        max_displayed_images=n_images)
     return figures
 
