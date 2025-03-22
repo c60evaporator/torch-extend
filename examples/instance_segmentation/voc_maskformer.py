@@ -12,13 +12,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
 
 # General Parameters
-EPOCHS = 50
+EPOCHS = 3
 BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
 DATA_ROOT = '../detection/datasets/VOC2012'
 # Optimizer Parameters
 OPT_NAME = 'adam'
-LR = 4e-5
+LR = 3e-5
 WEIGHT_DECAY = 0
 MOMENTUM = 0.9  # For SGD and RMSprop
 RMSPROP_ALPHA = 0.99  # For RMSprop
@@ -32,9 +32,11 @@ LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
+NO_OBJECT_WEIGHT = 0.1
 DICE_WEIGHT = 1.0
-CROSS_ENTROPY_WEIGHT = 1.0
+CROSS_ENTROPY_WEIGHT = 2.0
 MASK_WEIGHT = 20.0
+POST_PROCESS_SCORE_THRESHOLD = 0.1
 # Specify the model name from the Hugging Face Model Hub (https://huggingface.co/models?sort=downloads&search=maskformer)
 # Reference https://github.com/facebookresearch/MaskFormer/blob/main/MODEL_ZOO.md
 MODEL_NAME = 'facebook/maskformer-swin-base-ade'
@@ -156,12 +158,10 @@ def collate_fn(batch):
 #     encoding = image_processor.encode_inputs(images, segmentation_maps, 
 #                                              instance_id_to_semantic_id,
 #                                              return_tensors="pt")
-#     mask_labels = [mask_label[1:, :, :] for mask_label in encoding["mask_labels"]]  # remove background
-#     class_labels = [class_label[1:] for class_label in encoding["class_labels"]]  # remove background
 #     return {"pixel_values": encoding['pixel_values'],
 #             'pixel_mask': encoding['pixel_mask'],
-#             "class_labels": class_labels,
-#             "mask_labels": mask_labels}
+#             "class_labels": encoding["class_labels"],
+#             "mask_labels": encoding["mask_labels"]}
 
 # DataLoader
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
@@ -219,9 +219,14 @@ from transformers import MaskFormerConfig, MaskFormerForInstanceSegmentation
 model = MaskFormerForInstanceSegmentation.from_pretrained(MODEL_NAME,
                                                           id2label=idx_to_class,
                                                           ignore_mismatched_sizes=True,
+                                                          no_object_weight=NO_OBJECT_WEIGHT,
                                                           dice_weight=DICE_WEIGHT,
                                                           cross_entropy_weight=CROSS_ENTROPY_WEIGHT,
                                                           mask_weight=MASK_WEIGHT)
+# config = MaskFormerConfig(id2label=idx_to_class,
+#                           no_object_weight=NO_OBJECT_WEIGHT, dice_weight=DICE_WEIGHT,
+#                           cross_entropy_weight=CROSS_ENTROPY_WEIGHT, mask_weight=MASK_WEIGHT)
+# model = MaskFormerForInstanceSegmentation(config)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
@@ -286,41 +291,51 @@ def val_predict(batch, device, model):
     # Predict the batch
     pixel_values = batch["pixel_values"].to(device)
     pixel_mask = batch["pixel_mask"].to(device)
-    preds = model(pixel_values=pixel_values, pixel_mask=pixel_mask)
-    # Targets
-    mask_labels=[mask_label for mask_label in batch["mask_labels"]]
-    class_labels=[class_label for class_label in batch["class_labels"]]
+    mask_labels = [mask_label.to(device) for mask_label in batch["mask_labels"]]
+    class_labels = [class_label.to(device) for class_label in batch["class_labels"]]
+    preds = model(pixel_values=pixel_values, pixel_mask=pixel_mask,
+                  mask_labels=mask_labels, class_labels=class_labels)
     return preds, {'mask_labels': mask_labels, 'class_labels': class_labels}
 
 def calc_val_loss(preds, targets, criterion):
     """Calculate the validation loss from the batch"""
     return criterion(preds)
 
-def convert_preds_targets_to_torchvision(preds, targets):
+def convert_preds_targets_to_torchvision(preds, targets, device):
     """Convert the predictions and targets to TorchVision format"""
     # Post-process the predictions
     target_sizes = [target.shape[-2:] for target in targets["mask_labels"]]
     results = image_processor.post_process_instance_segmentation(
-        preds, target_sizes=target_sizes, threshold=0
+        preds, target_sizes=target_sizes,
+        threshold=POST_PROCESS_SCORE_THRESHOLD, return_binary_maps=True
     )
     preds = []
-    for result in results:
-        # Extract result whose area is not 0
-        instance_ids = torch.unique(result['segmentation']).tolist()
+    for result, target_size in zip(results, target_sizes):
+        # Extract result whose area is 0
+        areas = [mask.sum() for mask in result['segmentation']]
+        instance_ids = [seg_info['id'] for seg_info, area in zip(result['segments_info'], areas) if area > 0]
+        if len(instance_ids) != len(result['segments_info']):
+            print('Some instances have area 0.')
         # Create masks and labels from the predictions
-        masks = torch.stack([(torch.round(result['segmentation']) == seg_info['id']).to(torch.uint8)
-                             for seg_info in result['segments_info'] if seg_info['id'] in instance_ids])
-        labels = torch.tensor([seg_info['label_id'] for seg_info in result['segments_info'] if seg_info['id'] in instance_ids],
-                              dtype=torch.int64)
-        scores = torch.tensor([seg_info['score'] for seg_info in result['segments_info'] if seg_info['id'] in instance_ids],
-                              dtype=torch.float32)
+        if len(instance_ids) > 0:
+            masks = torch.round(result['segmentation']).to(torch.uint8)
+            labels = torch.tensor([seg_info['label_id'] for seg_info in result['segments_info']], dtype=torch.int64,
+                                  device=device)
+            scores = torch.tensor([seg_info['score'] for seg_info in result['segments_info']], dtype=torch.float32,
+                                  device=device)
+        else:
+            masks = torch.empty((0, *target_size), dtype=torch.uint8, device=device)
+            labels = torch.empty(0, dtype=torch.int64, device=device)
+            scores = torch.empty(0, dtype=torch.float32, device=device)
+            # print('No instance detected. Creating empty masks and labels.')
+
         # Create boxes from the predicted masks
         nonzero_masks = [mask.nonzero() for mask in masks]
         boxes = torch.tensor([
             [nonzero[:, 1].min(), nonzero[:, 0].min(),
             nonzero[:, 1].max(), nonzero[:, 0].max()]
             for nonzero in nonzero_masks
-        ], dtype=torch.float32)
+        ], dtype=torch.float32, device=device)
         preds.append({"masks": masks, "labels": labels, "scores": scores, "boxes": boxes})
     # Create masks and labels from the targets
     targets = [
@@ -334,11 +349,11 @@ def convert_preds_targets_to_torchvision(preds, targets):
             [nonzero[:, 1].min(), nonzero[:, 0].min(),
             nonzero[:, 1].max(), nonzero[:, 0].max()]
             for nonzero in nonzero_masks
-        ], dtype=torch.float32)
+        ], dtype=torch.float32, device=device)
     # Return as TorchVision format
     return preds, targets
 
-def convert_images_to_torchvision(batch):
+def convert_images_for_pred_to_torchvision(batch):
     proc_imgs, _ = convert_batch_to_torchvision(batch, in_fmt='transformers')
     return proc_imgs
 
@@ -367,13 +382,13 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Calculate the loss
     loss = calc_val_loss(preds, targets, criterion)
     # Convert the predicitions and targets to TorchVision format
-    preds, targets = convert_preds_targets_to_torchvision(preds, targets)
+    preds, targets = convert_preds_targets_to_torchvision(preds, targets, device)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
     # Display the predictions of the first batch
     if batch_idx == 0:
-        imgs = convert_images_to_torchvision(batch)
+        imgs = convert_images_for_pred_to_torchvision(batch)
         imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
         figures = plot_predictions(imgs, preds, targets)
         # Log the images to MLFlow
@@ -503,9 +518,11 @@ plt.show()
 #%% Plot predicted bounding boxes in the first minibatch of the validation dataset
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
-imgs, targets = next(val_iter)
-preds, targets = val_predict((imgs, targets), device, model)
-imgs = [denormalize_image(img, eval_transform) for img in imgs]
+batch = next(val_iter)
+preds, labels = val_predict(batch, device, model)
+preds, targets = convert_preds_targets_to_torchvision(preds, labels, device)
+imgs = convert_images_for_pred_to_torchvision(batch)
+imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
 plot_predictions(imgs, preds, targets)
 
 #%% Plot Box Average Precisions

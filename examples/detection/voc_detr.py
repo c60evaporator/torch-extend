@@ -85,7 +85,7 @@ torch.manual_seed(42)
 
 # %% Define the transforms
 ###### 2. Define the transforms ######
-from transformers import AutoImageProcessor, DetrImageProcessor
+from transformers import DetrImageProcessor
 import albumentations as A
 
 # Image Processor (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
@@ -112,7 +112,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import VOCDetection, CocoDetectionTV
+from torch_extend.dataset import VOCDetection
 from torch_extend.display.detection import show_bounding_boxes
 from torch_extend.data_converter.detection import convert_batch_to_torchvision
 
@@ -128,36 +128,6 @@ class_to_idx = train_dataset.class_to_idx
 num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
-
-
-
-# import torchvision
-# class CocoDetection(torchvision.datasets.CocoDetection):
-#     def __init__(self, img_folder, processor, train=True):
-#         ann_file = os.path.join(img_folder, "custom_train.json" if train else "custom_val.json")
-#         super(CocoDetection, self).__init__(img_folder, ann_file)
-#         self.processor = processor
-
-#     def __getitem__(self, idx):
-#         # read in PIL image and target in COCO format
-#         # feel free to add data augmentation here before passing them to the next step
-#         img, target = super(CocoDetection, self).__getitem__(idx)
-
-#         # preprocess image and target (converting target to DETR format, resizing + normalization of both image and target)
-#         image_id = self.ids[idx]
-#         target = {'image_id': image_id, 'annotations': target}
-#         encoding = self.processor(images=img, annotations=target, return_tensors="pt")
-#         pixel_values = encoding["pixel_values"].squeeze() # remove batch dimension
-#         target = encoding["labels"][0] # remove batch dimension
-
-#         return pixel_values, target
-
-# train_dataset = CocoDetection(img_folder='datasets/balloon/train', processor=image_processor)
-# val_dataset = CocoDetection(img_folder='datasets/balloon/val', processor=image_processor, train=False)
-# cats = train_dataset.coco.cats
-# idx_to_class = {k: v['name'] for k,v in cats.items()}
-
-
 
 # Collate function for the DataLoader 
 # Need to apply `processor.pad()` if image sizes are diffrent (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
@@ -296,15 +266,15 @@ def val_predict(batch, device, model):
     # Predict the batch
     pixel_values = batch["pixel_values"].to(device)
     pixel_mask = batch["pixel_mask"].to(device)
-    preds = model(pixel_values=pixel_values, pixel_mask=pixel_mask)
-    labels = [t for t in batch["labels"]]
+    labels = [{k: v.to(device) for k, v in t.items()} for t in batch["labels"]]
+    preds = model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels)
     return preds, labels
 
 def calc_val_loss(preds, targets, criterion):
     """Calculate the validation loss from the batch"""
     return criterion(preds)
 
-def convert_preds_targets_to_torchvision(preds, targets):
+def convert_preds_targets_to_torchvision(preds, targets, device):
     """Convert the predictions and targets to TorchVision format"""
     # Post-process the predictions
     orig_target_sizes = torch.stack([target["orig_size"] for target in targets], dim=0)
@@ -314,14 +284,14 @@ def convert_preds_targets_to_torchvision(preds, targets):
     # Convert the targets
     targets = [{
         "boxes": box_convert(target["boxes"], 'cxcywh', 'xyxy') \
-                 * torch.tensor([orig[1], orig[0], orig[1], orig[0]], dtype=torch.float32) if target["boxes"].shape[0] > 0 \
-                 else torch.zeros(size=(0, 4), dtype=torch.float32),
+                 * torch.tensor([orig[1], orig[0], orig[1], orig[0]], dtype=torch.float32, device=device) if target["boxes"].shape[0] > 0 \
+                 else torch.zeros(size=(0, 4), dtype=torch.float32, device=device),
         "labels": target["class_labels"]
     } for target, orig in zip(targets, orig_target_sizes)]
     # Return as TorchVision format
     return results, targets
 
-def convert_images_to_torchvision(batch):
+def convert_images_for_pred_to_torchvision(batch):
     proc_imgs, _ = convert_batch_to_torchvision(batch, in_fmt='transformers')
     orig_sizes = [label["orig_size"] for label in batch["labels"]]
     return [F.resize(img, orig_size.tolist()) for img, orig_size in zip(proc_imgs, orig_sizes)]
@@ -349,13 +319,13 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Calculate the loss
     loss = calc_val_loss(preds, targets, criterion)
     # Convert the predicitions and targets to TorchVision format
-    preds, targets = convert_preds_targets_to_torchvision(preds, targets)
+    preds, targets = convert_preds_targets_to_torchvision(preds, targets, device)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
     # Display the predictions of the first batch
     if batch_idx == 0:
-        imgs = convert_images_to_torchvision(batch)
+        imgs = convert_images_for_pred_to_torchvision(batch)
         imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
         figures = plot_predictions(imgs, preds, targets)
         # Log the images to MLFlow
@@ -490,10 +460,10 @@ model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 batch = next(val_iter)
 preds, labels = val_predict(batch, device, model)
-preds, targets = convert_preds_targets_to_torchvision(preds, labels)
-imgs = convert_images_to_torchvision(batch)
+preds, targets = convert_preds_targets_to_torchvision(preds, labels, device)
+imgs = convert_images_for_pred_to_torchvision(batch)
 imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
-show_predicted_bboxes(imgs, preds, targets, idx_to_class)
+plot_predictions(imgs, preds, targets)
 
 #%% Plot Average Precisions
 # Plot Average Precisions

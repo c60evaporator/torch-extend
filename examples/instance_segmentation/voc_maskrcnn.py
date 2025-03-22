@@ -185,7 +185,7 @@ for name, param in model.named_parameters():
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
 in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
-hidden_layer = 256
+hidden_layer = model.roi_heads.mask_predictor.conv5_mask.out_channels
 model.roi_heads.mask_predictor = mask_rcnn.MaskRCNNPredictor(in_features_mask, hidden_layer, num_classes)
 
 # %% Criterion, Optimizer and lr_schedulers
@@ -253,7 +253,7 @@ def calc_val_loss(preds, targets, criterion):
     """Calculate the validation loss from the batch"""
     return None
 
-def convert_preds_targets_to_torchvision(preds, targets):
+def convert_preds_targets_to_torchvision(preds, targets, device):
     """Convert the predictions and targets to TorchVision format"""
     # Mask float32(N, 1, H, W) -> uint8(N, H, W)
     preds = [{k: torch.round(v.squeeze(1)).to(torch.uint8)
@@ -261,7 +261,7 @@ def convert_preds_targets_to_torchvision(preds, targets):
              for pred in preds]
     return preds, targets
 
-def convert_images_to_torchvision(batch):
+def convert_images_for_pred_to_torchvision(batch):
     return batch[0]
 
 def get_preds_cpu(preds):
@@ -288,13 +288,13 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Calculate the loss
     loss = calc_val_loss(preds, targets, criterion)
     # Convert the predicitions and targets to TorchVision format
-    preds, targets = convert_preds_targets_to_torchvision(preds, targets)
+    preds, targets = convert_preds_targets_to_torchvision(preds, targets, device)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
     # Display the predictions of the first batch
     if batch_idx == 0:
-        imgs = convert_images_to_torchvision(batch)
+        imgs = convert_images_for_pred_to_torchvision(batch)
         imgs = [denormalize_image(img, eval_transform) for img in imgs]
         figures = plot_predictions(imgs, preds, targets)
         # Log the images to MLFlow

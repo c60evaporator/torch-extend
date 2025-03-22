@@ -239,9 +239,9 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
         # Convert the image from float32 [0, 1] to uint8 [0, 255]
         img = (img*255).to(torch.uint8).cpu().detach()
         # Extract the ground truth boxes, masks, and labels
-        boxes_true = target['boxes']
-        labels_true = target['labels']
-        masks_true = target['masks']
+        boxes_true = target['boxes'].cpu().detach()
+        labels_true = target['labels'].cpu().detach()
+        masks_true = target['masks'].cpu().detach()
         # Extract the predicted boxes, masks, and labels
         boxes = pred['boxes'].cpu().detach()
         labels = pred['labels'].cpu().detach().numpy()

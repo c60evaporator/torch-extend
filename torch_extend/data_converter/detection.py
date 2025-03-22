@@ -222,6 +222,7 @@ def convert_batch_to_torchvision(batch, in_fmt='transformers'):
     images = []
     targets = []
     if in_fmt == 'transformers':
+        device = batch['pixel_values'].device
         for pixel_value, pixel_mask, labels in zip(batch['pixel_values'], batch['pixel_mask'], batch['labels']):
             # Get the mask rectangle
             nonzero_rows = torch.nonzero(pixel_mask.sum(dim=1))
@@ -234,9 +235,10 @@ def convert_batch_to_torchvision(batch, in_fmt='transformers'):
             # Convert the labels to the target
             target = {}
             boxes = box_convert(labels['boxes'], "cxcywh", "xyxy")
-            target['boxes'] = boxes * torch.tensor([w, h, w, h], dtype=torch.float32) if boxes.shape[0] > 0 \
-                    else torch.zeros(size=(0, 4), dtype=torch.float32)
+            target['boxes'] = boxes * torch.tensor([w, h, w, h], dtype=torch.float32, device=device) if boxes.shape[0] > 0 \
+                    else torch.zeros(size=(0, 4), dtype=torch.float32, device=device)
             target['labels'] = labels['class_labels']
+            
             images.append(image)
             targets.append(target)
     

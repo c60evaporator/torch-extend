@@ -293,11 +293,11 @@ def calc_val_loss(preds, targets, criterion):
     """Calculate the validation loss from the batch"""
     return criterion(preds, targets)
 
-def convert_preds_targets_to_torchvision(preds, targets):
+def convert_preds_targets_to_torchvision(preds, targets, device):
     """Convert the predictions and targets to TorchVision format"""
     return preds, targets
 
-def convert_images_to_torchvision(batch):
+def convert_images_for_pred_to_torchvision(batch):
     """Convert the images to TorchVision format"""
     return batch[0]
 
@@ -332,13 +332,13 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Calculate the loss
     loss = calc_val_loss(preds, targets, criterion)
     # Convert the predicitions and targets to TorchVision format
-    preds, targets = convert_preds_targets_to_torchvision(preds, targets)
+    preds, targets = convert_preds_targets_to_torchvision(preds, targets, device)
     # Store the predictions and targets for calculating metrics
     val_batch_preds.extend(get_preds_cpu(preds))
     val_batch_targets.extend(get_targets_cpu(targets))
     # Display the predictions of the first batch
     if batch_idx == 0:
-        imgs = convert_images_to_torchvision(batch)
+        imgs = convert_images_for_pred_to_torchvision(batch)
         imgs = [denormalize_image(img, eval_transform) for img in imgs]
         figures = plot_predictions(imgs, preds, targets)
         # Log the images to MLFlow
