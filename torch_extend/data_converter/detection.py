@@ -147,7 +147,7 @@ def convert_image_target_to_transformers(image, target, image_id, processor, out
     Parameters
     ----------
     image : Dict
-        Source image data with TorchVision format torch.Tensor(C, H, W)
+        Source image data of numpy.ndarray or torch.Tensor with TorchVision format (C, H, W)
 
     target : Dict
         Source target data with TorchVision format
@@ -170,7 +170,7 @@ def convert_image_target_to_transformers(image, target, image_id, processor, out
     item: Dict
         Output data in the Transformers object detection format
         
-        detr: {"pixel_values": torch.Tensor(C, H, W), "pixel_mask": torch.Tensor(H, W), "labels": {"boxes": torch.Tensor(n_instances, 4), "class_labels": torch.Tensor(n_instances), "org_size": Tuple[int, int],...}} with boxes in normalized cxcywh format.
+        detr: {"pixel_values": torch.Tensor(C, H, W), "pixel_mask": torch.Tensor(H, W), "labels": {"boxes": torch.Tensor(n_instances, 4), "class_labels": torch.Tensor(n_instances), "orig_size": Tuple[int, int],...}} with boxes in normalized cxcywh format.
     """
     if out_fmt == 'detr':
         # format annotations in COCO format
@@ -207,7 +207,7 @@ def convert_batch_to_torchvision(batch, in_fmt='transformers'):
     in_fmt : Literal['transformers']
         Format of the input batch data.
 
-        'transformers': {"pixel_values": torch.Tensor(B, C, H, W), "pixel_mask": torch.Tensor(B, H, W), "labels": [{"boxes": torch.Tensor(n_instances, 4), "class_labels": torch.Tensor(n_instances), "org_size": Tuple[int, int],...},...]} with boxes in normalized cxcywh format
+        'transformers': {"pixel_values": torch.Tensor(B, C, H, W), "pixel_mask": torch.Tensor(B, H, W), "labels": [{"boxes": torch.Tensor(n_instances, 4), "class_labels": torch.Tensor(n_instances), "orig_size": Tuple[int, int],...},...]} with boxes in normalized cxcywh format
     
     Returns
     -------

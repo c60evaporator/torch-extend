@@ -94,7 +94,7 @@ from transformers import AutoImageProcessor, Mask2FormerImageProcessor
 import albumentations as A
 
 REDUCE_LABELS = False
-# Image Processor (https://huggingface.co/docs/transformers/preprocessing#computer-vision)
+# Image Processor (https://huggingface.co/docs/transformers/model_doc/mask2former#transformers.Mask2FormerImageProcessor)
 image_processor = Mask2FormerImageProcessor.from_pretrained(MODEL_NAME, do_reduce_labels=REDUCE_LABELS,
                                                             ignore_index=255 if REDUCE_LABELS else 0)
 
@@ -132,14 +132,12 @@ val_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='val',
                                       out_fmt='transformers', processor=image_processor)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
-num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
-if REDUCE_LABELS:
-    idx_to_class = {k-1: v for k, v in idx_to_class.items()}
-    class_to_idx = {v: k for k, v in idx_to_class.items()}
+bg_idx = train_dataset.bg_idx  # Background index
+border_idx = None  # Border index is None in Transformers format
 
-# Collate function for the DataLoader 
+# Collate function for the DataLoader
 def collate_fn(batch):
     pixel_values = torch.stack([item['pixel_values'] for item in batch])
     pixel_mask = torch.stack([item['pixel_mask'] for item in batch])
@@ -161,7 +159,7 @@ def collate_fn(batch):
 #             "mask_labels": encoding["mask_labels"]}
 
 # DataLoader
-train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
+train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE,
                               shuffle=True, num_workers=NUM_WORKERS,
                               collate_fn=collate_fn)
 val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
@@ -171,7 +169,7 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
 # Denormalize the image
 def denormalize_image(img, transform, processor):
     # Denormalization based on the transforms
-    for tr in transform:
+    for tr in transform.transforms:
         if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
             reverse_transform = v2.Compose([
                 v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
@@ -198,7 +196,7 @@ def show_image_and_target(img, target, ax=None):
     show_instance_masks(img, masks=masks, boxes=boxes,
                         border_mask=target['border_mask'] if 'border_mask' in target else None,
                         labels=labels,
-                        bg_idx=None if REDUCE_LABELS else 0,
+                        bg_idx=bg_idx, border_idx=border_idx,
                         idx_to_class=idx_to_class, ax=ax)
 
 train_iter = iter(train_dataloader)
@@ -226,6 +224,7 @@ model = Mask2FormerForUniversalSegmentation.from_pretrained(MODEL_NAME,
 # Criterion (Sum of all the losses)
 def criterion(outputs):
     return outputs.loss
+
 # Optimizer (Reference https://github.com/pytorch/vision/blob/main/references/classification/train.py)
 parameters = [p for p in model.parameters() if p.requires_grad]
 if OPT_NAME.startswith("sgd"):
@@ -364,7 +363,7 @@ def get_targets_cpu(targets):
 def plot_predictions(imgs, preds, targets, n_images=4):
     figures = show_predicted_instances(imgs, preds, targets, idx_to_class,
                                        border_mask=targets['border_mask'] if 'border_mask' in targets else None,
-                                       bg_idx=None if REDUCE_LABELS else 0,
+                                       bg_idx=bg_idx, border_idx=border_idx,
                                        max_displayed_images=n_images)
     return figures
 

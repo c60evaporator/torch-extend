@@ -37,8 +37,8 @@ LR_PATIENCE = 10  # For ReduceLROnPlateau
 MODEL_NAME = 'facebook/maskformer-swin-base-ade'
 
 # Log Parameters
-MLFLOW_TRACKING_URI = './log/mlruns'
-MLFLOW_EXPERIMENT_NAME = 'voc_instance'
+MLFLOW_TRACKING_URI = None
+MLFLOW_EXPERIMENT_NAME = 'ade20k_instance'
 MLFLOW_ARTIFACT_LOCATION = None
 
 # Start MLFlow experiment run
@@ -207,7 +207,7 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
 # Denormalize the image
 def denormalize_image(img, transform, processor):
     # Denormalization based on the transforms
-    for tr in transform:
+    for tr in transform.transforms:
         if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
             reverse_transform = v2.Compose([
                 v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],

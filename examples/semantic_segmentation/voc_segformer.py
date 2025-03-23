@@ -11,14 +11,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
 
 # General Parameters
-EPOCHS = 4
-BATCH_SIZE = 4  # Bigger batch size increase the training time in Object Detection. Very mall batch size (E.g., n=1, 2) results in bad accuracy and poor Batch Normalization.
+EPOCHS = 12
+BATCH_SIZE = 16
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
-DATA_ROOT = './datasets/VOC2012'
+DATA_ROOT = '../detection/datasets/VOC2012'
 # Optimizer Parameters
-OPT_NAME = 'sgd'
-LR = 0.005
-WEIGHT_DECAY = 0.0005
+OPT_NAME = 'adamw'
+LR = 1e-4
+WEIGHT_DECAY = 0
 MOMENTUM = 0.9  # For SGD and RMSprop
 RMSPROP_ALPHA = 0.99  # For RMSprop
 EPS = 1e-8  # For RMSprop, Adam, and AdamW
@@ -31,11 +31,12 @@ LR_STEPS = [16, 24]  # For MultiStepLR
 LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
-MODEL_NAME = 'fasterrcnn_resnet50_fpn'
+# Specify the model name from the Hugging Face Model Hub (https://huggingface.co/models?sort=downloads&search=nvidia%2Fmit)
+MODEL_NAME = 'nvidia/mit-b0'
 
 # Log Parameters
 MLFLOW_TRACKING_URI = './log/mlruns'
-MLFLOW_EXPERIMENT_NAME = 'voc_detection'
+MLFLOW_EXPERIMENT_NAME = 'voc_semantic'
 MLFLOW_ARTIFACT_LOCATION = None
 
 # Start MLFlow experiment run
@@ -83,22 +84,23 @@ torch.manual_seed(42)
 
 # %% Define the transforms
 ###### 2. Define the transforms ######
+from transformers import SegformerImageProcessor
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-# Note: ImageNet Normalization is not needed for TorchVision Faster R-CNN
-NORM_MEAN = [0.0, 0.0, 0.0]
-NORM_STD = [1.0, 1.0, 1.0]
+from torchvision.transforms import v2
+
+from torch_extend.validate.common import validate_same_img_size
+
+REDUCE_LABELS = False
+# Image Processor (https://huggingface.co/docs/transformers/model_doc/segformer#transformers.SegformerImageProcessor)
+image_processor = SegformerImageProcessor(reduce_labels=REDUCE_LABELS)
 
 # Transforms for training
 train_transform = A.Compose([
-    A.Normalize(NORM_MEAN, NORM_STD),  # Normalization from uint8 [0, 255] to float32 [0.0, 1.0]
-    ToTensorV2(),  # Convert from numpy.ndarray to torch.Tensor
-], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+])
 # Transforms for validation and test
 eval_transform = A.Compose([
-    A.Normalize(NORM_MEAN, NORM_STD),  # Normalization from uint8 [0, 255] to float32 [0.0, 1.0]
-    ToTensorV2()  # Convert from numpy.ndarray to torch.Tensor
-], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+])
 
 # Log the transforms
 if MLFLOW_TRACKING_URI is not None:
@@ -106,11 +108,9 @@ if MLFLOW_TRACKING_URI is not None:
         mlflow.log_param('train_transform', train_transform)
         mlflow.log_param('eval_transform', eval_transform)
 
-# from torchvision.transforms import v2
-# transform = v2.Compose([
-#     v2.ToImage(),  # Convert from PIL.Image to a torch.Tensor
-#     v2.ToDtype(torch.float32, scale=True)  # Convert from uint8 [0, 255] to float32 [0.0, 1.0]
-# ])
+# Validate the same image size
+same_img_size_train = validate_same_img_size(train_transform, image_processor)
+same_img_size_eval = validate_same_img_size(eval_transform, image_processor)
 
 # %% Define the dataset
 ###### 3. Define the dataset ######
@@ -118,32 +118,41 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 
-from torch_extend.dataset import VOCDetection
-from torch_extend.display.detection import show_bounding_boxes
+from torch_extend.dataset import VOCSemanticSegmentation
+from torch_extend.display.semantic_segmentation import show_segmentations
+from torch_extend.data_converter.semantic_segmentation import convert_batch_to_torchvision
+
 
 # Dataset
-train_dataset = VOCDetection(DATA_ROOT, image_set='train', download=True,
-                               transforms=train_transform)
-val_dataset = VOCDetection(DATA_ROOT, image_set='val',
-                             transforms=eval_transform)
+train_dataset = VOCSemanticSegmentation(DATA_ROOT, image_set='train', download=True,
+                                        transforms=train_transform,
+                                        out_fmt='transformers', processor=image_processor)
+val_dataset = VOCSemanticSegmentation(DATA_ROOT, image_set='val',
+                                      transforms=eval_transform,
+                                      out_fmt='transformers', processor=image_processor)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
-num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
+bg_idx = train_dataset.bg_idx  # Background index
+border_idx = train_dataset.border_idx  # Border index
 
-# Dataloader
+# Collate function for the DataLoader
 def collate_fn(batch):
-    return tuple(zip(*batch))
+    pixel_values = torch.stack([item['pixel_values'] for item in batch])
+    labels = torch.stack([item['labels'] for item in batch])
+    return {"pixel_values": pixel_values, "labels": labels}
+
+# DataLoader
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
                               shuffle=True, num_workers=NUM_WORKERS,
                               collate_fn=collate_fn)
-val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
+val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
                             shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=collate_fn)
 
 # Denormalize the image
-def denormalize_image(img, transform):
+def denormalize_image(img, transform, processor):
     # Denormalization based on the transforms
     for tr in transform.transforms:
         if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
@@ -152,53 +161,48 @@ def denormalize_image(img, transform):
                                     std=[1/std for std in tr.std])
             ])
             img = reverse_transform(img)
+    # Denormalization based on the processor or Transformers
+    if processor.do_normalize:
+        denormalize_image = v2.Compose([
+            v2.Normalize(mean=[-mean/std for mean, std in zip(processor.image_mean, processor.image_std)],
+                        std=[1/std for std in processor.image_std])
+        ])
+        img = denormalize_image(img)
     return img
 
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
     """Function for showing the image and target"""
     # Denormalize the image
-    img = denormalize_image(img, train_transform)
-    # Show the image
+    img = denormalize_image(img, train_transform, image_processor)
+    # Show the image and target
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
-    boxes, labels = target['boxes'], target['labels']
-    show_bounding_boxes(img, boxes, labels=labels,
-                        idx_to_class=idx_to_class, ax=ax)
+    show_segmentations(img, target, idx_to_class, 
+                       bg_idx=bg_idx, border_idx=border_idx)
 
 train_iter = iter(train_dataloader)
-imgs, targets = next(train_iter)
+batch = next(train_iter)
+imgs, targets = convert_batch_to_torchvision(batch, in_fmt='transformers')
 for i, (img, target) in enumerate(zip(imgs, targets)):
-    # Show the image and target
     show_image_and_target(img, target)
     plt.show()
 
 # %% Define the model
 ###### 4. Define the model ######
-from torchvision.models.detection import faster_rcnn
+from transformers import SegformerForSemanticSegmentation
 
-if MODEL_NAME == 'fasterrcnn_resnet50_fpn':
-    model = faster_rcnn.fasterrcnn_resnet50_fpn(weights=faster_rcnn.FasterRCNN_ResNet50_FPN_Weights.COCO_V1)
-elif MODEL_NAME == 'fasterrcnn_resnet50_fpn_v2':
-    model = faster_rcnn.fasterrcnn_resnet50_fpn_v2(weights=faster_rcnn.FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1)
-elif MODEL_NAME == 'fasterrcnn_mobilenet_v3_large_320_fpn':
-    model = faster_rcnn.fasterrcnn_mobilenet_v3_large_320_fpn(weights=faster_rcnn.FasterRCNN_MobileNet_V3_Large_320_FPN_Weights.COCO_V1)
-elif MODEL_NAME == 'fasterrcnn_mobilenet_v3_large_fpn':
-    model = faster_rcnn.fasterrcnn_mobilenet_v3_large_fpn(weights=faster_rcnn.FasterRCNN_MobileNet_V3_Large_FPN_Weights.COCO_V1)
-else:
-    raise ValueError(f"Invalid model name: {MODEL_NAME}")
-
-# Freeze the parameters
-for name, param in model.named_parameters():
-    param.requires_grad = False
-# Replace layers for transfer learning
-in_features = model.roi_heads.box_predictor.cls_score.in_features
-model.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(in_features, num_classes)
+# Load the model
+model = SegformerForSemanticSegmentation.from_pretrained(MODEL_NAME,
+                                                         num_labels=len(idx_to_class),
+                                                         id2label=idx_to_class,
+                                                         label2id=class_to_idx)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
 # Criterion (Sum of all the losses)
 def criterion(outputs):
-    return sum(loss for loss in outputs.values())
+    return outputs.loss
+
 # Optimizer (Reference https://github.com/pytorch/vision/blob/main/references/classification/train.py)
 parameters = [p for p in model.parameters() if p.requires_grad]
 if OPT_NAME.startswith("sgd"):
@@ -230,19 +234,20 @@ elif LR_SCHEDULER == "reducelronplateau":
 ###### 6. Training and Validation loop ######
 import time
 from tqdm import tqdm
-from torchmetrics.detection import MeanAveragePrecision
+import numpy as np
 import cv2
 import numpy as np
 import io
+from torchmetrics.functional.segmentation import mean_iou
 
-from torch_extend.display.detection import show_predicted_bboxes
+from torch_extend.metrics.semantic_segmentation import segmentation_ious
+from torch_extend.display.semantic_segmentation import show_predicted_segmentations
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
-    inputs = [img.to(device) for img in batch[0]]
-    targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
-                for t in batch[1]]
-    outputs = model(inputs, targets)
+    pixel_values = batch["pixel_values"].to(device)
+    labels = batch["labels"].to(device)
+    outputs = model(pixel_values=pixel_values, labels=labels)
     return criterion(outputs)
 
 def training_step(batch, batch_idx, device, model, criterion):
@@ -253,32 +258,42 @@ def training_step(batch, batch_idx, device, model, criterion):
 def val_predict(batch, device, model):
     """Predict the validation batch"""
     # Predict the batch
-    return model([img.to(device) for img in batch[0]]), batch[1]
+    pixel_values = batch["pixel_values"].to(device)
+    labels = batch["labels"].to(device)
+    preds = model(pixel_values=pixel_values, labels=labels)
+    return preds, labels
 
 def calc_val_loss(preds, targets, criterion):
     """Calculate the validation loss from the batch"""
-    return None
+    return criterion(preds)
 
 def convert_preds_targets_to_torchvision(preds, targets, device):
     """Convert the predictions and targets to TorchVision format"""
-    return preds, targets
+    # Upsample the logits
+    target_size = targets.shape[-2:]
+    upsampled_logits = torch.nn.functional.interpolate(
+        preds.logits, size=target_size, mode="bilinear", align_corners=False
+    )
+    # Return as TorchVision format
+    return upsampled_logits, targets
 
 def convert_images_for_pred_to_torchvision(batch):
-    return batch[0]
+    proc_imgs, _ = convert_batch_to_torchvision(batch, in_fmt='transformers')
+    return proc_imgs
 
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
-    return [{k: v.cpu() for k, v in pred.items()} 
-            for pred in preds]
+    # Raw logits data uses too much memory, so only store the predicted labels
+    return [pred.argmax(0).cpu() for pred in preds]
 
 def get_targets_cpu(targets):
     """Get the targets and store them to CPU as a list"""
-    return [{k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in target.items()}
-            for target in targets]
+    return [target.cpu() for target in targets]
 
 def plot_predictions(imgs, preds, targets, n_images=4):
-    figures = show_predicted_bboxes(imgs, preds, targets, idx_to_class,
-                                    max_displayed_images=n_images)
+    figures = show_predicted_segmentations(imgs, preds, targets, idx_to_class,
+                                           bg_idx=bg_idx, border_idx=border_idx, plot_raw_image=True,
+                                           max_displayed_images=n_images)
     return figures
 
 def validation_step(batch, batch_idx, device, model, criterion,
@@ -296,13 +311,12 @@ def validation_step(batch, batch_idx, device, model, criterion,
     # Display the predictions of the first batch
     if batch_idx == 0:
         imgs = convert_images_for_pred_to_torchvision(batch)
-        imgs = [denormalize_image(img, eval_transform) for img in imgs]
+        imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
         figures = plot_predictions(imgs, preds, targets)
         # Log the images to MLFlow
         if MLFLOW_TRACKING_URI is not None:
             with mlflow.start_run(run_id=run.info.run_id):
                 for i, fig in enumerate(figures):
-                    # Matplotlib figure to numpy array
                     img_byte_arr = io.BytesIO()
                     fig.savefig(img_byte_arr, format='png')
                     img_byte_arr = cv2.imdecode(np.frombuffer(img_byte_arr.getvalue(), np.uint8), 1)
@@ -312,16 +326,33 @@ def validation_step(batch, batch_idx, device, model, criterion,
 
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
-    # Calculate the Mean Average Precision
-    map_metric = MeanAveragePrecision(iou_type=["bbox"], class_metrics=True, extended_summary=True)
-    map_metric.update(preds, targets)
-    map_score = map_metric.compute()
-    global last_preds
-    global last_targets
-    last_preds = preds
-    last_targets = targets
-    print(f'BoxAP_50-95={map_score["map"].item()}, BoxAP_50={map_score["map_50"].item()}, BoxAP_75={map_score["map_75"].item()}')
-    return {'BoxAP_50-95': map_score["map"].item(), 'BoxAP_50': map_score["map_50"].item(), 'BoxAP_75': map_score["map_75"].item()}
+    # Torchmetrics first calculates the mean IoU per image and then calculates the mean of them. Furthermore, nan is regarded as 0 during calculating the mean and it causes the underestimation of the mean IoU. Therefore, we calculate the mean IoU manually.
+    # preds_torch = torch.stack([pred.argmax(0) for pred in preds])
+    # targets_torch = torch.stack(targets)
+    # targets_torch[targets_torch == border_idx] = num_classes # Replace the border index with the biggest index + 1
+    # miou = MeanIoU(num_classes=num_classes+1, per_class=True, input_format='index')
+    # mean_ious = miou(preds_torch, targets_torch).tolist()
+    # mean_ious_per_image = mean_iou(preds_torch, targets_torch, num_classes=num_classes+1, per_class=True, input_format='index')
+    # mean_ious = mean_ious_per_image.mean(dim=0).tolist()
+
+    # Calculate mean IoU which is calclated with all pixels in all images. This method also ignores border pixels in the targets.
+    tps, fps, fns, mean_ious, label_indices = segmentation_ious(preds, targets, idx_to_class, 
+                                                                pred_type='label', border_idx=border_idx, bg_idx=bg_idx)
+    mean_iou = np.mean(mean_ious)
+    global last_ious
+    last_ious = {
+        label: {
+            'label_index': label,
+            'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+            'tps': tps[i],
+            'fps': fps[i],
+            'fns': fns[i],
+            'iou': mean_ious[i]
+        }
+        for i, label in enumerate(label_indices) 
+    }
+    print(f'mean_iou={mean_iou}')
+    return {'mean_iou': mean_iou}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -358,9 +389,6 @@ def val_one_epoch(loader, device, model,
                                    val_batch_preds, val_batch_targets)
             if loss is not None:
                 val_step_losses.append(loss.detach().item())  # Record the loss
-            # Plot the predicted bounding boxes
-            # if batch_idx == 0:
-            #     show_predicted_bboxes(batch[0], val_batch_preds, val_batch_targets, idx_to_class)
     torch.set_grad_enabled(True)
     model.train()
     # Calculate the metrics
@@ -375,13 +403,13 @@ start = time.time()
 for i_epoch in range(EPOCHS):
     # Train one epoch
     train_step_losses = train_one_epoch(train_dataloader, device, model,
-                                        criterion, optimizer, lr_scheduler)
+                                         criterion, optimizer, lr_scheduler)
     # Calculate the average loss
     train_loss_epoch = sum(train_step_losses) / len(train_step_losses)
     train_epoch_losses.append(train_loss_epoch)
     # Validate one epoch
     val_step_losses, val_metrics_epoch = val_one_epoch(val_dataloader, device, model,
-                                                       criterion)
+                                                criterion)
     # Calculate the average loss
     val_loss_epoch = None
     if len(val_step_losses) > 0:
@@ -426,9 +454,7 @@ for i, metric_name in enumerate(val_metrics_all[0].keys()):
 fig.tight_layout()
 plt.show()
 
-#%% Plot predicted bounding boxes in the first minibatch of the validation dataset
-from torch_extend.display.detection import show_predicted_bboxes
-
+#%% Plot predicted segmentation in the first minibatch of the validation dataset
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
@@ -436,10 +462,10 @@ preds, targets = val_predict((imgs, targets), device, model)
 imgs = [denormalize_image(img, eval_transform) for img in imgs]
 plot_predictions(imgs, preds, targets)
 
-#%% Plot Average Precisions
-# Plot Average Precisions
-from torch_extend.display.detection import show_average_precisions
+#%% Display IOUs
+# Display IOUs
+import pandas as pd
 
-show_average_precisions(last_preds, last_targets, idx_to_class)
+print(pd.DataFrame([v for k, v in last_ious.items()]))
 
 #%%

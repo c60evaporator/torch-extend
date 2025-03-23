@@ -9,7 +9,7 @@ def convert_image_target_to_transformers(image, target, processor, same_img_size
     Parameters
     ----------
     image : Dict
-        Source image data with TorchVision format torch.Tensor(C, H, W)
+        Source image data of numpy.ndarray or torch.Tensor with TorchVision format (C, H, W)
 
     target : Dict
         Source target data with TorchVision format

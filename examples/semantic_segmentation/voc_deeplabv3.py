@@ -106,6 +106,16 @@ eval_transform = A.Compose([
     ToTensorV2()  # Convert from numpy.ndarray to torch.Tensor
 ])
 
+# from torchvision.transforms import v2
+# train_transform = v2.Compose([
+#     v2.ToTensor(),
+#     v2.Resize((520, 520)),
+#     v2.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+# ])
+# target_transform = v2.Compose([
+#     v2.Resize((520, 520))
+# ])
+
 # Log the transforms
 if MLFLOW_TRACKING_URI is not None:
     with mlflow.start_run(run_id=run.info.run_id):
@@ -141,9 +151,10 @@ idx_to_class = {v: k for k, v in class_to_idx.items()}
 border_idx = train_dataset.border_idx
 bg_idx = train_dataset.bg_idx
 
-# Dataloader
+# Collate function for the DataLoader 
 def collate_fn(batch):
     return tuple(zip(*batch))
+# DataLoader
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
                               shuffle=True, num_workers=NUM_WORKERS,
                               collate_fn=None)
@@ -154,7 +165,7 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
 # Denormalize the image
 def denormalize_image(img, transform):
     # Denormalization based on the transforms
-    for tr in transform:
+    for tr in transform.transforms:
         if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
             reverse_transform = v2.Compose([
                 v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
@@ -170,7 +181,7 @@ def show_image_and_target(img, target, ax=None):
     img = denormalize_image(img, train_transform)
     # Show the image and target
     img = (img*255).to(torch.uint8)  # Convert from float[0, 1] to uint[0, 255]
-    show_segmentations(img, target, idx_to_class, bg_idx=0, border_idx=border_idx)
+    show_segmentations(img, target, idx_to_class, bg_idx=bg_idx, border_idx=border_idx)
 
 train_iter = iter(train_dataloader)
 imgs, targets = next(train_iter)
@@ -245,6 +256,7 @@ import numpy as np
 import cv2
 import numpy as np
 import io
+from torchmetrics.functional.segmentation import mean_iou
 
 from torch_extend.metrics.semantic_segmentation import segmentation_ious
 from torch_extend.display.semantic_segmentation import show_predicted_segmentations
@@ -286,24 +298,25 @@ def convert_preds_targets_to_torchvision(preds, targets, device):
 def convert_images_for_pred_to_torchvision(batch):
     return batch[0]
 
-def plot_predictions(imgs, preds, targets, n_images=4):
-    figures = show_predicted_segmentations(imgs, preds, targets, idx_to_class,
-                                            bg_idx=bg_idx, border_idx=border_idx, plot_raw_image=True,
-                                            max_displayed_images=n_images)
-    return figures
-
 def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
+    # Raw logits data uses too much memory, so only store the predicted labels
     if isinstance(preds, torch.Tensor):
-        return [pred for pred in preds.cpu()]
+        return [pred.argmax(0) for pred in preds.cpu()]
     elif isinstance(preds, tuple):  # Tuple images by collate_fn
-        return [pred.cpu() for pred in preds]
+        return [pred.argmax(0).cpu() for pred in preds]
     else:
         raise ValueError("Invalid type of the model output. The model output should be a Tensor, a dict with 'out' key, or a tuple of them.")
 
 def get_targets_cpu(targets):
     """Get the targets and store them to CPU as a list"""
     return [target.cpu() for target in targets]
+
+def plot_predictions(imgs, preds, targets, n_images=4):
+    figures = show_predicted_segmentations(imgs, preds, targets, idx_to_class,
+                                           bg_idx=bg_idx, border_idx=border_idx, plot_raw_image=True,
+                                           max_displayed_images=n_images)
+    return figures
 
 def validation_step(batch, batch_idx, device, model, criterion,
                     val_batch_preds, val_batch_targets):
@@ -335,19 +348,30 @@ def validation_step(batch, batch_idx, device, model, criterion,
 
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
-    # Calculate IoUs
-    tps, fps, fns, ious = segmentation_ious(preds, targets, idx_to_class, border_idx)
-    mean_iou = np.mean(ious)
+    # Torchmetrics first calculates the mean IoU per image and then calculates the mean of them. Furthermore, nan is regarded as 0 during calculating the mean and it causes the underestimation of the mean IoU. Therefore, we calculate the mean IoU manually.
+    # preds_torch = torch.stack([pred.argmax(0) for pred in preds])
+    # targets_torch = torch.stack(targets)
+    # targets_torch[targets_torch == border_idx] = num_classes # Replace the border index with the biggest index + 1
+    # miou = MeanIoU(num_classes=num_classes+1, per_class=True, input_format='index')
+    # mean_ious = miou(preds_torch, targets_torch).tolist()
+    # mean_ious_per_image = mean_iou(preds_torch, targets_torch, num_classes=num_classes+1, per_class=True, input_format='index')
+    # mean_ious = mean_ious_per_image.mean(dim=0).tolist()
+
+    # Calculate mean IoU which is calclated with all pixels in all images. This method also ignores border pixels in the targets.
+    tps, fps, fns, mean_ious, label_indices = segmentation_ious(preds, targets, idx_to_class, 
+                                                                pred_type='label', border_idx=border_idx, bg_idx=bg_idx)
+    mean_iou = np.mean(mean_ious)
     global last_ious
     last_ious = {
-        k: {
-            'label_name': v,
-            'tp': tps[i],
-            'fp': fps[i],
-            'fn': fns[i],
-            'iou': ious[i]
+        label: {
+            'label_index': label,
+            'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+            'tps': tps[i],
+            'fps': fps[i],
+            'fns': fns[i],
+            'iou': mean_ious[i]
         }
-        for i, (k, v) in enumerate(idx_to_class.items())
+        for i, label in enumerate(label_indices) 
     }
     print(f'mean_iou={mean_iou}')
     return {'mean_iou': mean_iou}

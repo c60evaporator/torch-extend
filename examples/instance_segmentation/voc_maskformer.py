@@ -96,7 +96,7 @@ import albumentations as A
 import numpy as np
 
 REDUCE_LABELS = False
-# Image Processor
+# Image Processor (https://huggingface.co/docs/transformers/model_doc/maskformer#transformers.MaskFormerImageProcessor)
 image_processor = MaskFormerImageProcessor.from_pretrained(MODEL_NAME, do_reduce_labels=REDUCE_LABELS,
                                                            ignore_index=255 if REDUCE_LABELS else 0,
                                                            size={'height': 512, 'width': 512})
@@ -138,9 +138,8 @@ val_dataset = VOCInstanceSegmentation(DATA_ROOT, image_set='val',
 class_to_idx = train_dataset.class_to_idx
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
-if REDUCE_LABELS:
-    idx_to_class = {k-1: v for k, v in idx_to_class.items()}
-    class_to_idx = {v: k for k, v in idx_to_class.items()}
+bg_idx = train_dataset.bg_idx  # Background index
+border_idx = None  # Border index is None in Transformers format
 
 # Collate function for the DataLoader 
 def collate_fn(batch):
@@ -174,7 +173,7 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
 # Denormalize the image
 def denormalize_image(img, transform, processor):
     # Denormalization based on the transforms
-    for tr in transform:
+    for tr in transform.transforms:
         if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
             reverse_transform = v2.Compose([
                 v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
@@ -201,7 +200,7 @@ def show_image_and_target(img, target, ax=None):
     show_instance_masks(img, masks=masks, boxes=boxes,
                         border_mask=target['border_mask'] if 'border_mask' in target else None,
                         labels=labels,
-                        bg_idx=None if REDUCE_LABELS else 0,
+                        bg_idx=bg_idx, border_idx=border_idx,
                         idx_to_class=idx_to_class, ax=ax)
 
 train_iter = iter(train_dataloader)
@@ -233,6 +232,7 @@ model = MaskFormerForInstanceSegmentation.from_pretrained(MODEL_NAME,
 # Criterion (Sum of all the losses)
 def criterion(outputs):
     return outputs.loss
+
 # Optimizer (Reference https://github.com/pytorch/vision/blob/main/references/classification/train.py)
 parameters = [p for p in model.parameters() if p.requires_grad]
 if OPT_NAME.startswith("sgd"):
@@ -370,7 +370,7 @@ def get_targets_cpu(targets):
 def plot_predictions(imgs, preds, targets, n_images=4):
     figures = show_predicted_instances(imgs, preds, targets, idx_to_class,
                                        border_mask=targets['border_mask'] if 'border_mask' in targets else None,
-                                       bg_idx=None if REDUCE_LABELS else 0,
+                                       bg_idx=bg_idx, border_idx=border_idx,
                                        max_displayed_images=n_images)
     return figures
 

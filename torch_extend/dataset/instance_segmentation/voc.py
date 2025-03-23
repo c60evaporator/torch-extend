@@ -56,6 +56,13 @@ class VOCInstanceSegmentation(VOCDetection):
                          transform, target_transform, transforms,
                          False, processor)
         self.border_idx = border_idx
+        # Background index is 0 in default
+        self.bg_idx = 0
+        # If `do_reduce_labels=True` in the processor, `idx_to_class` is also reduced and back index is set to `processor.ignore_index`
+        if out_fmt == "transformers" and self.processor.do_reduce_labels:
+            self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
+            self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
+            self.bg_idx = self.processor.ignore_index
 
     def __len__(self) -> int:
         return len(self.images_instance)
@@ -68,7 +75,7 @@ class VOCInstanceSegmentation(VOCDetection):
         # Read bounding box XML file 
         objects = self._load_voc_bboxes(self.bboxes_instance[index])
         # Get the labels
-        labels = [self.class_to_idx[obj['name']] for obj in objects]
+        labels = [self.class_to_idx_orig[obj['name']] for obj in objects]
         # Get the bounding boxes
         box_keys = ['xmin', 'ymin', 'xmax', 'ymax']
         boxes = [[int(obj['bndbox'][k]) for k in box_keys] for obj in objects]
@@ -143,7 +150,7 @@ class VOCInstanceSegmentation(VOCDetection):
         if self.out_fmt == "torchvision":
             return image, target
 
-        # Output as Transformers format
+        # Output as Transformers format (Border mask is ignored and regarded as background)
         elif self.out_fmt == "transformers":
             return convert_image_target_to_transformers(image, target, self.processor, self.same_img_size, 
                                                         out_fmt="maskformer")

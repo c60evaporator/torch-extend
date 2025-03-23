@@ -156,7 +156,7 @@ val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
 # Denormalize the image
 def denormalize_image(img, transform):
     # Denormalization based on the transforms
-    for tr in transform:
+    for tr in transform.transforms:
         if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
             reverse_transform = v2.Compose([
                 v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],

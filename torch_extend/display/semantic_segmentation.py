@@ -126,19 +126,21 @@ def show_segmentation(image, target,
         labels_unique = torch.unique(target).cpu().detach().numpy().tolist()
         # Convert class IDs to class names
         if idx_to_class is None:
-            idx_to_class_bd = {idx: str(idx) 
+            idx_to_class_bg = {idx: str(idx) 
                                for idx in range(np.max(labels_unique[labels_unique != border_idx]))}
         else:
-            idx_to_class_bd = {k: v for k, v in idx_to_class.items()}
+            idx_to_class_bg = {k: v for k, v in idx_to_class.items()}
         # Add the background and border label
         if bg_idx is not None:
-            idx_to_class_bd[bg_idx] = 'background'
-        if border_idx is not None:
-            idx_to_class_bd[border_idx] = 'border'
+            idx_to_class_bg[bg_idx] = 'background'
         # Make the label text with IoU scores
-        label_dict = {k: v for k, v in idx_to_class_bd.items()}
         if iou_scores is not None:
-            label_dict = {k: f'{v}, IoU={round(iou_scores[k], score_decimal)}' for k, v in label_dict.items()}
+            label_dict = {k: f'{v}, IoU={round(iou_scores[k], score_decimal)}' 
+                          for k, v in idx_to_class_bg.items()}
+        else:
+            label_dict = {k: v for k, v in idx_to_class_bg.items()}
+            if border_idx is not None:
+                label_dict[border_idx] = 'border'
         # Add legend
         handles = [mpatches.Patch(facecolor=(palette[label][0]/255,
                                          palette[label][1]/255,
@@ -256,15 +258,20 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
         axes[1].set_title('Raw image')
         # Calculate IoU
         if calc_iou:
+            # Index to class dictionary with background and border
             idx_to_class_bd = {k: v for k, v in idx_to_class.items()}
             if bg_idx is not None:
                 idx_to_class_bd[bg_idx] = 'background'
             if border_idx is not None:
                 idx_to_class_bd[border_idx] = 'border'
-            ious, _, _, _ = segmentation_ious_one_image(predicted_labels, target, list(idx_to_class_bd.keys()))
+            # Label indices for IoU calculation
+            label_indices = list(idx_to_class.keys())
+            if bg_idx is not None and bg_idx not in label_indices:
+                label_indices.insert(0, bg_idx)
+            ious, _, _, _ = segmentation_ious_one_image(predicted_labels, target, label_indices, border_idx=border_idx)
             iou_scores = {
-                k: ious[i]
-                for i, (k, v) in enumerate(idx_to_class_bd.items())
+                label: ious[i]
+                for i, label in enumerate(label_indices)
             }
         else:
             iou_scores = None

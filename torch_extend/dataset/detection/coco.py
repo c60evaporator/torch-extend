@@ -48,23 +48,23 @@ class CocoDetection(ds.CocoDetection, DetectionOutput):
         processor: Optional[BaseImageProcessor] = None
     ) -> None:
         super().__init__(root, annFile, transform, target_transform, transforms)
-        class_to_idx = {
-            v['name']: v['id']
+        # Index to class dictionary
+        self.idx_to_class = {
+            v['id']: v['name']
             for k, v in self.coco.cats.items()
         }
-        # Index to class dict
-        self.idx_to_class = {v: k for k, v in class_to_idx.items()}
         na_cnt = 0
-        for i in range(max(class_to_idx.values())):
-            if i not in class_to_idx.values():
+        for i in range(max(self.idx_to_class.keys())):
+            if i not in self.idx_to_class.keys():
                 na_cnt += 1
                 self.idx_to_class[i] = f'NA{"{:02}".format(na_cnt)}'
+        # Class to index dictionary
+        self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         # Reduce the labels
         self.reduce_labels = reduce_labels
         if self.reduce_labels:
             self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
-        # Class to index dictionary
-        self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
+            self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         # Set the output format
         self.out_fmt = out_fmt
         # Set Transformers processor

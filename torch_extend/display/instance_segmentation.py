@@ -18,7 +18,7 @@ def _convert_masks_to_seg_mask(image, masks, labels, border_mask=None, bg_idx=0,
     if bg_idx is None:
         bg_idx = -1
     seg_mask = torch.full_like(image[0, :, :], bg_idx, dtype=torch.int64)
-    accumulated_mask = torch.full_like(image[0, :, :], bg_idx, dtype=torch.int64)
+    accumulated_mask = torch.full_like(image[0, :, :], 0, dtype=torch.int64)
     for mask, label in zip(masks, labels):
         seg_mask.masked_fill_(mask.bool(), label)
         accumulated_mask += mask
@@ -33,7 +33,7 @@ def _convert_masks_to_seg_mask(image, masks, labels, border_mask=None, bg_idx=0,
 def show_instance_masks(image, masks, boxes=None,
                         border_mask=None,
                         labels=None, idx_to_class=None,
-                        bg_idx=0, border_idx=255,
+                        bg_idx=0, border_idx=None,
                         mask_ious=None, box_ious=None, iou_decimal=3,
                         scores=None, score_decimal=3,
                         colors=None, fill=False, width=1,
@@ -169,7 +169,7 @@ def show_instance_masks(image, masks, boxes=None,
         ax.legend(handles=handles)
 
 def show_predicted_instances(imgs, preds, targets, idx_to_class,
-                             bg_idx=0, border_idx=255,
+                             bg_idx=0, border_idx=None,
                              border_mask=None, separate_boxes=False,
                              max_displayed_images=10, score_threshold=0.2,
                              calc_iou=True, score_decimal=3, iou_decimal=3,

@@ -183,12 +183,14 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
             self.idx_to_class = self.IDX_TO_CLASS
         else:
             self.idx_to_class = idx_to_class
+        # Class to index dictionary
+        self.class_to_idx_orig = {v: k for k, v in self.idx_to_class.items()}
+        self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         # Reduce the labels
         self.reduce_labels = reduce_labels
         if self.reduce_labels:
             self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
-        # Class to index dictionary
-        self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
+            self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
         # Set the output format
         self.out_fmt = out_fmt
         # Set Transformers processor
@@ -218,7 +220,7 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
         # Read XML file 
         objects = self._load_voc_bboxes(self.bboxes_detection[index])
         # Get the labels
-        labels = [self.class_to_idx[obj['name']] for obj in objects]
+        labels = [self.class_to_idx_orig[obj['name']] for obj in objects]
         # Get the bounding boxes
         box_keys = ['xmin', 'ymin', 'xmax', 'ymax']
         boxes = [[int(obj['bndbox'][k]) for k in box_keys] for obj in objects]

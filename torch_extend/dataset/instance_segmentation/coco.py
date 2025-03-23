@@ -43,6 +43,13 @@ class CocoInstanceSegmentation(CocoDetection):
         processor: Optional[BaseImageProcessor] = None
     ) -> None:
         super().__init__(root, annFile, out_fmt, transform, target_transform, transforms, False, processor)
+        # Background index is 0 in default
+        self.bg_idx = 0
+        # If `do_reduce_labels=True` in the processor, `idx_to_class` is also reduced and back index is set to `processor.ignore_index`
+        if out_fmt == "transformers" and self.processor.do_reduce_labels:
+            self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
+            self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
+            self.bg_idx = self.processor.ignore_index
 
     def _load_target(self, id: int, height: int, width: int) -> List[Any]:
         target_src = self.coco.loadAnns(self.coco.getAnnIds(id))
