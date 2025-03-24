@@ -7,18 +7,18 @@ import numpy as np
 import time
 import tqdm
 
-def segmentation_ious_one_image(labels_pred: Tensor, target: Tensor, label_indices: List[int], border_idx:int = None):
+def segmentation_ious_one_image_or_batch(labels_pred: Tensor, target: Tensor, label_indices: List[int], border_idx:int = None):
     """
-    Calculate segmentation IoUs, TP, FP, FN in one image
+    Calculate segmentation IoUs, TP, FP, FN in one image or batch
 
     Reference: https://stackoverflow.com/questions/31653576/how-to-calculate-the-mean-iu-score-in-image-segmentation
     
     Parameters
     ----------
-    labels_pred : List[Tensor(H x W)]
+    labels_pred : Tensor(H, W) or Tensor(B, H, W)
         The predicted labels of each pixel
 
-    target : List[Tensor(H x W)]
+    target : Tensor(H, W) or Tensor(B, H, W)
         The true labels of each pixel
     
     label_indices : List[int]
@@ -43,8 +43,8 @@ def segmentation_ious_one_image(labels_pred: Tensor, target: Tensor, label_indic
     ious = np.divide(tps, unions.astype(np.float32), out=np.full((len(label_indices),), np.nan), where=(unions!=0))
     return ious, tps, fps, fns, confmat
 
-def segmentation_ious(preds: Union[List[Tensor], Tensor],
-                      targets: Union[List[Tensor], Tensor],
+def segmentation_ious(preds: List[Tensor],
+                      targets: List[Tensor],
                       idx_to_class: Dict[int, str],
                       pred_type: Literal['label', 'logit'] = 'logit',
                       bg_idx:int = 0,
@@ -58,12 +58,14 @@ def segmentation_ious(preds: Union[List[Tensor], Tensor],
     
     Parameters
     ----------
-    preds : List[Tensor(class x H x W)] or Tensor(image_idx x class x H x W)
+    preds : List[Tensor(class, H, W)] or List[Tensor(B, class, H, W)]
         List of the predicted segmentation images.
 
-        If `pred_type` is 'label', preds are the predicted labels of List[Tensor(H x W)] or Tensor(image_idx x H x W).
+        If `pred_type` is 'logit', preds are the logit values of List[Tensor(class, H, W)] or Tensor(B, class, H, W).
 
-    targets : List[Tensor(H x W)] or Tensor(image_idx x H x W)
+        If `pred_type` is 'label', preds are the predicted labels of List[Tensor(H, W)] or Tensor(B, H, W).
+
+    targets : List[Tensor(H, W)] or List[Tensor(B, class, H, W)]
         List of the true segmentation images
 
     idx_to_class : Dict[int, str]
@@ -93,56 +95,59 @@ def segmentation_ious(preds: Union[List[Tensor], Tensor],
     confmat_batch : np.ndarray
         Confusion matrix of all the pixels in the batch
     """
-    if isinstance(preds, Tensor) != isinstance(targets, Tensor):
-        raise ValueError('The types of preds and targets must be the same.')
+    if not isinstance(preds, list) or len(preds)==0 or not isinstance(preds[0], Tensor):
+        raise ValueError('The `preds` must be lists of prediction mask of Tensor(H, W) or mask batch of Tensor(B, H, W).')
+    if not isinstance(targets, list) or len(targets)==0 or not isinstance(targets[0], Tensor):
+        raise ValueError('The `targets` must be lists of target mask of Tensor(H, W) or mask batch of Tensor(B, H, W).')
+    
     if len(preds) != len(targets):
         raise ValueError('The number of preds and targets must be the same.')
+    
+    if preds[0].dim() == 2:
+        tensor_unit = 'image'
+        if targets[0].dim() != 2:
+            raise ValueError('The dimension of the target tensor must be 2 (H, W) if the prediction tensor is 2 (H, W).')
+    elif preds[0].dim() == 3:
+        tensor_unit = 'batch'
+        if targets[0].dim() != 3:
+            raise ValueError('The dimension of the target tensor must be 3 (B, H, W) if the prediction tensor is 3 (B, H, W).')
+    else:
+        raise ValueError('The dimension of the prediction tensor must be 2 (H, W) or 3 (B, H, W).')
 
     # Add the background to the labels if exists
     label_indices = list(idx_to_class.keys())
     if bg_idx is not None and bg_idx not in label_indices:
         label_indices.insert(0, bg_idx)
 
-    # If preds and targets are tensors, calculate IoUs at once
-    if isinstance(preds, Tensor):
+    # calculate IoUs per image or batch
+    tps_batch = []
+    fps_batch = []
+    fns_batch = []
+    confmat_batch = np.zeros((len(label_indices), len(label_indices)))
+    # Loop of images
+    for i, (pred, target) in enumerate(zip(preds, targets)):
         # Get the predicted labels
         if pred_type == 'label':
-            labels_preds = preds
+            labels_pred = pred
         elif pred_type == 'logit':
-            labels_preds = preds.argmax(1)
+            labels_pred = pred.argmax(0) if tensor_unit == 'image' else pred.argmax(1)
+        else:
+            raise ValueError('The `pred_type` must be either "label" or "logit".')
         # Calculate the IoUs
-        ious_batch, tps_batch, fps_batch, fns_batch, confmat_batch = segmentation_ious_one_image(
-            labels_preds, targets, label_indices=label_indices, border_idx=border_idx)
-        
-    # If preds and targets are lists, calculate IoUs per image
-    else:
-        # List for storing scores
-        tps_batch = []
-        fps_batch = []
-        fns_batch = []
-        confmat_batch = np.zeros((len(label_indices), len(label_indices)))
-        # Loop of images
-        for i, (pred, target) in enumerate(zip(preds, targets)):
-            # Get the predicted labels
-            if pred_type == 'label':
-                labels_pred = pred
-            elif pred_type == 'logit':
-                labels_pred = pred.argmax(0)
-            # Calculate the IoUs
-            ious, tps, fps, fns, confmat = segmentation_ious_one_image(labels_pred, target, label_indices=label_indices,
-                                                                       border_idx=border_idx)
-            tps_batch.append(tps)
-            fps_batch.append(fps)
-            fns_batch.append(fns)
-            confmat_batch += confmat
-            if i > 0 and i%100 == 0:  # Show progress every 100 images
-                print(f'Calculating IOUs: {i}/{len(preds)}')
-        # Accumulate IoUs
-        tps_batch = np.array(tps_batch).sum(axis=0)
-        fps_batch = np.array(fps_batch).sum(axis=0)
-        fns_batch = np.array(fns_batch).sum(axis=0)
-        union_batch = tps_batch + fps_batch + fns_batch
-        ious_batch = np.divide(tps_batch, union_batch.astype(np.float32), out=np.full((len(tps_batch),), np.nan), where=(union_batch!=0))
+        ious, tps, fps, fns, confmat = segmentation_ious_one_image_or_batch(
+            labels_pred, target, label_indices=label_indices, border_idx=border_idx)
+        tps_batch.append(tps)
+        fps_batch.append(fps)
+        fns_batch.append(fns)
+        confmat_batch += confmat
+        if i > 0 and i%100 == 0:  # Show progress every 100 images
+            print(f'Calculating IOUs: {i}/{len(preds)}{tensor_unit}s')
+    # Accumulate IoUs
+    tps_batch = np.array(tps_batch).sum(axis=0)
+    fps_batch = np.array(fps_batch).sum(axis=0)
+    fns_batch = np.array(fns_batch).sum(axis=0)
+    union_batch = tps_batch + fps_batch + fns_batch
+    ious_batch = np.divide(tps_batch, union_batch.astype(np.float32), out=np.full((len(tps_batch),), np.nan), where=(union_batch!=0))
     
     return tps_batch, fps_batch, fns_batch, ious_batch, label_indices, confmat_batch
 
