@@ -11,7 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(ROOT)
 
 # General Parameters
-EPOCHS = 12
+EPOCHS = 10
 BATCH_SIZE = 16
 NUM_WORKERS = 2  # 2 * Number of devices (GPUs) is appropriate in general, but this number doesn't matter in Object Detection.
 DATA_ROOT = '../detection/datasets/VOC2012'
@@ -132,6 +132,7 @@ val_dataset = VOCSemanticSegmentation(DATA_ROOT, image_set='val',
                                       out_fmt='transformers', processor=image_processor)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
+num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 bg_idx = train_dataset.bg_idx  # Background index
@@ -192,10 +193,12 @@ for i, (img, target) in enumerate(zip(imgs, targets)):
 from transformers import SegformerForSemanticSegmentation
 
 # Load the model
+label2id=dict(**{'background': bg_idx}, **class_to_idx)  # Add the background index
+id2label = {v: k for k, v in label2id.items()}
 model = SegformerForSemanticSegmentation.from_pretrained(MODEL_NAME,
-                                                         num_labels=len(idx_to_class),
-                                                         id2label=idx_to_class,
-                                                         label2id=class_to_idx)
+                                                         num_labels=num_classes,
+                                                         id2label=id2label,
+                                                         label2id=label2id)
 
 # %% Criterion, Optimizer and lr_schedulers
 ###### 5. Criterion, Optimizer and lr_schedulers ######
@@ -336,20 +339,23 @@ def calc_epoch_metrics(preds, targets):
     # mean_ious = mean_ious_per_image.mean(dim=0).tolist()
 
     # Calculate mean IoU which is calclated with all pixels in all images. This method also ignores border pixels in the targets.
-    tps, fps, fns, mean_ious, label_indices = segmentation_ious(preds, targets, idx_to_class, 
-                                                                pred_type='label', border_idx=border_idx, bg_idx=bg_idx)
+    tps, fps, fns, mean_ious, label_indices, confmat = segmentation_ious(
+        preds, targets, idx_to_class, pred_type='label', border_idx=border_idx, bg_idx=bg_idx)
     mean_iou = np.mean(mean_ious)
     global last_ious
     last_ious = {
-        label: {
-            'label_index': label,
-            'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
-            'tps': tps[i],
-            'fps': fps[i],
-            'fns': fns[i],
-            'iou': mean_ious[i]
-        }
-        for i, label in enumerate(label_indices) 
+        'per_class': {
+            label: {
+                'label_index': label,
+                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+                'tps': tps[i],
+                'fps': fps[i],
+                'fns': fns[i],
+                'iou': mean_ious[i],
+            }
+            for i, label in enumerate(label_indices)
+        },
+        'confmat': confmat
     }
     print(f'mean_iou={mean_iou}')
     return {'mean_iou': mean_iou}
@@ -462,10 +468,23 @@ preds, targets = val_predict((imgs, targets), device, model)
 imgs = [denormalize_image(img, eval_transform) for img in imgs]
 plot_predictions(imgs, preds, targets)
 
-#%% Display IOUs
+#%% Display IOUs and Cofusion Matrix
 # Display IOUs
 import pandas as pd
+import seaborn as sns
+from matplotlib.colors import LogNorm
 
-print(pd.DataFrame([v for k, v in last_ious.items()]))
+# Display the IOUs
+print(pd.DataFrame([v for v in last_ious['per_class'].values()]))
 
-#%%
+# Display the confusion matrix
+label_dict = {k: v['label_name'] for k, v in last_ious['per_class'].items()}
+df_confmat = pd.DataFrame(last_ious['confmat'], index=label_dict.values(), columns=label_dict.values())
+plt.figure(figsize=(len(label_dict), len(label_dict)*0.8))
+sns.heatmap(df_confmat, annot=True, fmt=".2g", cmap='Blues', norm=LogNorm())
+plt.xlabel('Predicted', fontsize=16)
+plt.ylabel('True', fontsize=16)
+plt.title('Confusion Matrix', fontsize=20)
+plt.show()
+
+# %%

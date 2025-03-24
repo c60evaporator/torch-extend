@@ -268,7 +268,7 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
             label_indices = list(idx_to_class.keys())
             if bg_idx is not None and bg_idx not in label_indices:
                 label_indices.insert(0, bg_idx)
-            ious, _, _, _ = segmentation_ious_one_image(predicted_labels, target, label_indices, border_idx=border_idx)
+            ious, _, _, _, _ = segmentation_ious_one_image(predicted_labels, target, label_indices, border_idx=border_idx)
             iou_scores = {
                 label: ious[i]
                 for i, label in enumerate(label_indices)

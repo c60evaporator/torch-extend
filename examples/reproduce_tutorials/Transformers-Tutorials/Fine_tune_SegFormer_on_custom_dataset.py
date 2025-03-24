@@ -332,20 +332,23 @@ def validation_step(batch, batch_idx, device, model, criterion,
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Calculate mean IoU which is calclated with all pixels in all images. This method also ignores border pixels in the targets.
-    tps, fps, fns, mean_ious, label_indices = segmentation_ious(preds, targets, idx_to_class, 
-                                                                pred_type='label', border_idx=border_idx, bg_idx=bg_idx)
+    tps, fps, fns, mean_ious, label_indices, confmat = segmentation_ious(
+        preds, targets, idx_to_class, pred_type='label', border_idx=border_idx, bg_idx=bg_idx)
     mean_iou = np.mean(mean_ious)
     global last_ious
     last_ious = {
-        label: {
-            'label_index': label,
-            'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
-            'tps': tps[i],
-            'fps': fps[i],
-            'fns': fns[i],
-            'iou': mean_ious[i]
-        }
-        for i, label in enumerate(label_indices) 
+        'per_class': {
+            label: {
+                'label_index': label,
+                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+                'tps': tps[i],
+                'fps': fps[i],
+                'fns': fns[i],
+                'iou': mean_ious[i],
+            }
+            for i, label in enumerate(label_indices)
+        },
+        'confmat': confmat
     }
     print(f'mean_iou={mean_iou}')
     return {'mean_iou': mean_iou}
@@ -450,18 +453,31 @@ for i, metric_name in enumerate(val_metrics_all[0].keys()):
 fig.tight_layout()
 plt.show()
 
-#%% Plot predicted bounding boxes in the first minibatch of the validation dataset
+#%% Plot predicted segmentation in the first minibatch of the validation dataset
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
 imgs, targets = next(val_iter)
 preds, targets = val_predict((imgs, targets), device, model)
-imgs = [denormalize_image(img, eval_transform) for img in imgs]
+imgs = [denormalize_image(img, image_processor) for img in imgs]
 plot_predictions(imgs, preds, targets)
 
-#%% Plot Box Average Precisions
-# Plot Box Average Precisions
-from torch_extend.display.detection import show_average_precisions
+#%% Display IOUs and Cofusion Matrix
+# Display IOUs
+import pandas as pd
+import seaborn as sns
+from matplotlib.colors import LogNorm
 
-show_average_precisions(last_preds, last_targets, idx_to_class)
+# Display the IOUs
+print(pd.DataFrame([v for v in last_ious['per_class'].values()]))
 
-#%%
+# Display the confusion matrix
+label_dict = {k: v['label_name'] for k, v in last_ious['per_class'].items()}
+df_confmat = pd.DataFrame(last_ious['confmat'], index=label_dict.values(), columns=label_dict.values())
+plt.figure(figsize=(len(label_dict), len(label_dict)*0.8))
+sns.heatmap(df_confmat, annot=True, fmt=".2g", cmap='Blues', norm=LogNorm())
+plt.xlabel('Predicted', fontsize=16)
+plt.ylabel('True', fontsize=16)
+plt.title('Confusion Matrix', fontsize=20)
+plt.show()
+
+# %%

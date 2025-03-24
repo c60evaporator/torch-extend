@@ -41,7 +41,7 @@ def segmentation_ious_one_image(labels_pred: Tensor, target: Tensor, label_indic
     fps = preds - tps
     fns = gts - tps
     ious = np.divide(tps, unions.astype(np.float32), out=np.full((len(label_indices),), np.nan), where=(unions!=0))
-    return ious, tps, fps, fns
+    return ious, tps, fps, fns, confmat
 
 def segmentation_ious(preds: Union[List[Tensor], Tensor],
                       targets: Union[List[Tensor], Tensor],
@@ -90,6 +90,8 @@ def segmentation_ious(preds: Union[List[Tensor], Tensor],
         IoUs of each class in the batch
     label_indices : List[int]
         The list of label indices
+    confmat_batch : np.ndarray
+        Confusion matrix of all the pixels in the batch
     """
     if isinstance(preds, Tensor) != isinstance(targets, Tensor):
         raise ValueError('The types of preds and targets must be the same.')
@@ -109,7 +111,7 @@ def segmentation_ious(preds: Union[List[Tensor], Tensor],
         elif pred_type == 'logit':
             labels_preds = preds.argmax(1)
         # Calculate the IoUs
-        ious_batch, tps_batch, fps_batch, fns_batch = segmentation_ious_one_image(
+        ious_batch, tps_batch, fps_batch, fns_batch, confmat_batch = segmentation_ious_one_image(
             labels_preds, targets, label_indices=label_indices, border_idx=border_idx)
         
     # If preds and targets are lists, calculate IoUs per image
@@ -118,6 +120,7 @@ def segmentation_ious(preds: Union[List[Tensor], Tensor],
         tps_batch = []
         fps_batch = []
         fns_batch = []
+        confmat_batch = np.zeros((len(label_indices), len(label_indices)))
         # Loop of images
         for i, (pred, target) in enumerate(zip(preds, targets)):
             # Get the predicted labels
@@ -126,11 +129,12 @@ def segmentation_ious(preds: Union[List[Tensor], Tensor],
             elif pred_type == 'logit':
                 labels_pred = pred.argmax(0)
             # Calculate the IoUs
-            ious, tps, fps, fns = segmentation_ious_one_image(labels_pred, target, label_indices=label_indices,
-                                                            border_idx=border_idx)
+            ious, tps, fps, fns, confmat = segmentation_ious_one_image(labels_pred, target, label_indices=label_indices,
+                                                                       border_idx=border_idx)
             tps_batch.append(tps)
             fps_batch.append(fps)
             fns_batch.append(fns)
+            confmat_batch += confmat
             if i > 0 and i%100 == 0:  # Show progress every 100 images
                 print(f'Calculating IOUs: {i}/{len(preds)}')
         # Accumulate IoUs
@@ -140,7 +144,7 @@ def segmentation_ious(preds: Union[List[Tensor], Tensor],
         union_batch = tps_batch + fps_batch + fns_batch
         ious_batch = np.divide(tps_batch, union_batch.astype(np.float32), out=np.full((len(tps_batch),), np.nan), where=(union_batch!=0))
     
-    return tps_batch, fps_batch, fns_batch, ious_batch, label_indices
+    return tps_batch, fps_batch, fns_batch, ious_batch, label_indices, confmat_batch
 
 def segmentation_ious_torchvison(dataloader: DataLoader, model: nn.Module, device: Literal['cuda', 'cpu'],
                                  idx_to_class: Dict[int, str], border_idx:int = None):
@@ -191,8 +195,8 @@ def segmentation_ious_torchvison(dataloader: DataLoader, model: nn.Module, devic
             else:
                 raise ValueError('The model output is neither a Tensor nor a dict with "out" key. Please check the model output format.')
         # Calculate TP, FP, FN of the batch
-        tps_batch, fps_batch, fns_batch, ious_batch, label_indices = segmentation_ious(preds, targets, idx_to_class,
-                                                                                       bg_idx=0, border_idx=border_idx)
+        tps_batch, fps_batch, fns_batch, ious_batch, label_indices, confmat = segmentation_ious(
+            preds, targets, idx_to_class, bg_idx=0, border_idx=border_idx)
         tps_all.append(tps_batch)
         fps_all.append(fps_batch)
         fns_all.append(fns_batch)
@@ -206,16 +210,20 @@ def segmentation_ious_torchvison(dataloader: DataLoader, model: nn.Module, devic
 
     # Store the result
     iou_dict = {
-        label: {
-            'label_index': label,
-            'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
-            'tps': tps_all[i],
-            'fps': fps_all[i],
-            'fns': fns_all[i],
-            'iou': ious_all[i]
-        }
-        for i, label in enumerate(label_indices) 
+        'per_class': {
+            label: {
+                'label_index': label,
+                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+                'tps': tps_all[i],
+                'fps': fps_all[i],
+                'fns': fns_all[i],
+                'iou': ious_all[i]
+            }
+            for i, label in enumerate(label_indices) 
+        },
+        'confmat': confmat
     }
+
     torch.set_grad_enabled(True)
     model.train()
 

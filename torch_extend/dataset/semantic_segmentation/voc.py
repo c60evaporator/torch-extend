@@ -80,10 +80,6 @@ class VOCSemanticSegmentation(VOCBaseTV, SemanticSegOutput):
                     self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
                     self.bg_idx = None  # Background index is ignored if `do_reduce_labels=True`
                     self.border_idx = 255  # Background is regared as border if `do_reduce_labels=True`
-                # If `processor.do_reduce_labels=False`, Add the background to `idx_to_class`
-                else:
-                    self.idx_to_class[bg_idx] = "background"
-                    self.class_to_idx["background"] = bg_idx
         else:
             self.processor = None
         # Chech whether all the image sizes are the same
