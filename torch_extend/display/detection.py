@@ -61,10 +61,10 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
         ax=plt.gca()
     # If ious is None, create dummy ious
     if ious is None:
-        ious = [float('nan')] * len(boxes)
+        ious = torch.full((len(boxes),), float('nan'))
     # If scores is None, create dummy scores
     if scores is None:
-        scores = [float('nan')] * len(boxes)
+        scores = torch.full((len(boxes),), float('nan'))
     # If colors is None, create a color palette
     if colors is None:
         colors = sns.color_palette(n_colors=256).as_hex()
@@ -79,23 +79,23 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
     # Show bounding boxes
     for box, label, label_name, score, iou in zip(boxes, labels, label_names, scores, ious):
         # Show Rectangle of the bounding box
-        r = patches.Rectangle(xy=(box[0], box[1]), 
-                              width=box[2]-box[0], 
-                              height=box[3]-box[1], 
-                              ec=colors[label], fill=fill,
+        r = patches.Rectangle(xy=(box[0].item(), box[1].item()), 
+                              width=box[2].item()-box[0].item(), 
+                              height=box[3].item()-box[1].item(), 
+                              ec=colors[label.item()], fill=fill,
                               lw=width)
         ax.add_patch(r)
         # Show label, score, and IoU
         shown_text = label_name
-        if not math.isnan(score):
-            shown_text += f', score={round(float(score),score_decimal)}'
-        if not math.isnan(iou):
+        if not torch.isnan(score):
+            shown_text += f', score={round(float(score.item()),score_decimal)}'
+        if not torch.isnan(iou):
             if iou > 0.0:
-                shown_text += f', TP, IoU={round(float(iou),iou_decimal)}'
+                shown_text += f', TP, IoU={round(float(iou.item()),iou_decimal)}'
             else:
                 shown_text += ', FP'
-        ax.text(box[0], box[1]-width, shown_text, 
-                color=colors[label] if text_color is None else text_color,
+        ax.text(box[0].item(), box[1].item()-width, shown_text, 
+                color=colors[label.item()] if text_color is None else text_color,
                 fontsize=font_size)
     
     # image_with_boxes = draw_bounding_boxes(image, boxes, labels=label_names, colors=colors,
@@ -106,9 +106,9 @@ def show_bounding_boxes(image, boxes, labels=None, idx_to_class=None,
     # Draw Anomaly boxes
     if anomaly_indices is not None:
         for idx in anomaly_indices:
-            ax.plot(boxes[idx][0], boxes[idx][1], marker='X', markersize=6, color = 'red') #　Anomaly topleft
-            plt.text(boxes[idx][0], boxes[idx][1]-width, labels[idx], color='red', fontsize=8)
-            ax.plot(boxes[idx][2], boxes[idx][3], marker='X', markersize=6, color = 'red') #　Anomaly bottomright
+            ax.plot(boxes[idx][0].item(), boxes[idx][1].item(), marker='X', markersize=6, color = 'red') #　Anomaly topleft
+            plt.text(boxes[idx][0].item(), boxes[idx][1].item()-width, labels[idx].item(), color='red', fontsize=8)
+            ax.plot(boxes[idx][2].item(), boxes[idx][3].item(), marker='X', markersize=6, color = 'red') #　Anomaly bottomright
 
 def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
                           max_displayed_images=10, score_threshold=0.2,
@@ -200,10 +200,10 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
                 scores_confident = None
             # Calculate IoU
             if calc_iou:
-                ious = [
+                ious = torch.tensor([
                     det.iou_object_detection(box_pred, label_pred, boxes_true, labels_true)
                     for box_pred, label_pred in zip(boxes_confident, labels_confident)
-                ]
+                ], dtype=torch.float32)
             else:
                 ious = None
             # Show the predicted bounding boxes with scores and IoUs

@@ -330,14 +330,6 @@ def validation_step(batch, batch_idx, device, model, criterion,
 def calc_epoch_metrics(preds, targets):
     """Calculate the metrics from the targets and predictions"""
     # Torchmetrics first calculates the mean IoU per image and then calculates the mean of them. Furthermore, nan is regarded as 0 during calculating the mean and it causes the underestimation of the mean IoU. Therefore, we calculate the mean IoU manually.
-    # preds_torch = torch.stack([pred.argmax(0) for pred in preds])
-    # targets_torch = torch.stack(targets)
-    # targets_torch[targets_torch == border_idx] = num_classes # Replace the border index with the biggest index + 1
-    # miou = MeanIoU(num_classes=num_classes+1, per_class=True, input_format='index')
-    # mean_ious = miou(preds_torch, targets_torch).tolist()
-    # mean_ious_per_image = mean_iou(preds_torch, targets_torch, num_classes=num_classes+1, per_class=True, input_format='index')
-    # mean_ious = mean_ious_per_image.mean(dim=0).tolist()
-
     # Calculate mean IoU which is calclated with all pixels in all images. This method also ignores border pixels in the targets.
     tps, fps, fns, mean_ious, label_indices, confmat = segmentation_ious(
         preds, targets, idx_to_class, pred_type='label', border_idx=border_idx, bg_idx=bg_idx)

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict, Literal
 import torch
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -190,6 +190,7 @@ def show_segmentations(image, target,
     plt.show()
 
 def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
+                                 pred_type: Literal['label', 'logit'] = 'logit',
                                  alpha=0.5, palette=None,
                                  bg_idx=0, border_idx=None,
                                  plot_raw_image=True,
@@ -200,11 +201,15 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
 
     Parameters
     ----------
-    imgs : torch.Tensor (image_idx x C x H x W)
+    imgs : torch.Tensor (B, C, H, W)
         Images which are standardized to [0, 1]
     
-    preds : List[Tensor(class x H x W)] or Tensor(image_idx x class x H x W)
+    preds : List[Tensor(class, H, W)] or Tensor(B, class, H, W)
         List of the prediction result.
+
+        If `pred_type` is 'logit', preds are the logit values of List[Tensor(class, H, W)] or Tensor(B, class, H, W).
+
+        If `pred_type` is 'label', preds are the predicted labels of List[Tensor(H, W)] or Tensor(B, H, W).
     
     targets : torch.Tensor (image_idx x H x W) (TorchVision segmentation target format)
         Ground truths which indicates the label index of each pixel
@@ -212,6 +217,9 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
         If None, class ID is used for the plot
+
+    pred_type : Literal['label', 'logit']
+        The type of the prediction. If 'label', preds are the predicted labels. If 'logit', preds are the logit values.
 
     calc_iou : bool
         If True, the IoU is calculated and displayed with the label
@@ -245,7 +253,7 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
     # Image loop
     for i, (img, pred, target) in enumerate(zip(imgs, preds, targets)):
         img = (img*255).to(torch.uint8).cpu().detach()  # Change from float[0, 1] to uint[0, 255]
-        predicted_labels = pred.argmax(0).cpu().detach()
+        predicted_labels = pred.argmax(0).cpu().detach() if pred_type == 'logit' else pred.cpu().detach()
         # Create a camvas
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         # Plot the true segmentation

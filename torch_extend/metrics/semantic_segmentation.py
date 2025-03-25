@@ -50,12 +50,8 @@ def segmentation_ious(preds: List[Tensor],
                       bg_idx:int = 0,
                       border_idx:int = None):
     """
-    Calculate the average precision of each class label
+    Calculate mean IoUs of each class label
 
-    .. note::
-        This average precision is based on Area under curve (AUC) AP, NOT based on Interpolated AP. 
-        Reference: https://jonathan-hui.medium.com/map-mean-average-precision-for-object-detection-45c121a31173
-    
     Parameters
     ----------
     preds : List[Tensor(class, H, W)] or List[Tensor(B, class, H, W)]

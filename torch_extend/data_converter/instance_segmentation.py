@@ -2,6 +2,55 @@ from typing import Literal
 import torch
 from torchvision.ops import box_convert
 
+def convert_instance_masks_to_semantic_mask(masks, labels, 
+                                            bg_idx=0, border_idx=255, border_mask=None,
+                                            add_occlusion=True, occlusion_priority=None):
+    """
+    Convert instance masks to a single semantic segmentation mask.
+
+    Parameters
+    ----------
+    masks : torch.Tensor (N, H, W)
+        Target masks of the objects
+    labels : torch.Tensor (N)
+        Target labels of the objects
+    bg_idx : int
+        The index of the background in the target mask.
+    border_idx : int
+        The index of the border in the target mask.
+    border_mask : torch.Tensor (H, W)
+        Boolean (uint8 0/1) mask for the border area
+    add_occlusion : bool
+        If True, the occlusion index (254) is added to the output mask
+    occlusion_priority : List[int]
+        The list of label indices that indicate the priority when the occlusion occurs.
+        The first label in the list has the highest priority.
+        If None, the priority is based on the order of the labels.
+    """
+    if bg_idx is None:
+        bg_idx = -1
+    # If occlusion_priority is None, set the priority based on the order of the labels
+    if occlusion_priority is None:
+        occlusion_priority = torch.unique(labels).cpu().detach().numpy().tolist()
+    # Sort the masks and labels based on the occlusion priority (Reverse order)
+    indices_priority = [occlusion_priority.index(label.item()) for label in labels]
+    sorted_labels = [label for _, label in sorted(zip(indices_priority, labels), key=lambda x: x[0], reverse=True)]
+    sorted_masks = [mask for _, mask in sorted(zip(indices_priority, masks), key=lambda x: x[0], reverse=True)]
+    # Accumulate the masks
+    seg_mask = torch.full(masks.size()[-2:], bg_idx, dtype=torch.int64)
+    accumulated_mask = torch.full(masks.size()[-2:], 0, dtype=torch.int64)
+    for mask, label in zip(sorted_masks, sorted_labels):
+        seg_mask.masked_fill_(mask.bool(), label)
+        accumulated_mask += mask
+    # Add occlusion mask
+    occulded_mask = accumulated_mask > 1
+    if add_occlusion:
+        seg_mask.masked_fill_(occulded_mask, 254)
+    # border
+    if border_mask is not None:
+        seg_mask.masked_fill_(border_mask.bool(), border_idx)
+    return seg_mask
+
 def convert_image_target_to_transformers(image, target, processor, same_img_size, out_fmt='maskformer'):
     """
     Convert image and target from TorchVision to Transformers format (Reference: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/DETR/Fine_tuning_DetrForObjectDetection_on_custom_dataset_(balloon).ipynb)

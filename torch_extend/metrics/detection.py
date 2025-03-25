@@ -1,5 +1,6 @@
 from typing import Dict, List, Literal
-from torch import nn, Tensor, no_grad
+import torch
+from torch import nn, no_grad
 from torchvision import ops
 from torch.utils.data import DataLoader
 from sklearn.metrics import auc
@@ -49,35 +50,36 @@ def extract_cofident_boxes(boxes, labels, scores, score_threshold, masks=None):
 
     Parameters
     ----------    
-    boxes : array-like of shape (n_boxes, 4)
+    boxes : array-like of shape (n_boxes, 4) or torch.Tensor(n_boxes, 4)
         A float array of bounding boxes in the format of (xmin, ymin, xmax, ymax).
     
-    labels : array-like of shape (n_boxes,)
+    labels : array-like of shape (n_boxes,) or torch.Tensor(n_boxes)
         An integer array of class labels.
 
-    scores : array-like of shape (n_boxes,)
+    scores : array-like of shape (n_boxes,) or torch.Tensor(n_boxes)
         A float array of confidence scores.
     
     score_threshold : float
         Bounding boxes whose confidence score exceed this threshold are used as the predicted bounding boxes.
     
-    masks : array-like of shape (n_boxes, H, W)
+    masks : array-like of shape (n_boxes, H, W) or torch.Tensor(n_boxes, H, W)
         A float array of masks. This is used for instance segmentation.
     """
-    boxes_confident = []
-    labels_confident = []
-    scores_confident = []
-    # Create dummy masks if masks is not set
-    masks_confident = []
-    if masks is None:
-        masks = [None] * len(boxes)
-    # Extract bounding boxes whose score > score_threshold
-    for score, box, label, mask in zip(scores, boxes.tolist(), labels, masks):
-        if score > score_threshold:
-            labels_confident.append(label)
-            boxes_confident.append(Tensor(box))
-            scores_confident.append(score)
-            masks_confident.append(mask)
+    # Convert to torch.Tensor if the input is not torch.Tensor
+    if not isinstance(boxes, torch.Tensor):
+        boxes = torch.tensor(boxes, dtype=torch.float32)
+    if not isinstance(labels, torch.Tensor):
+        labels = torch.tensor(labels, dtype=torch.int64)
+    if not isinstance(scores, torch.Tensor):
+        scores = torch.tensor(scores, dtype=torch.float32)
+    if masks is not None and not isinstance(masks, torch.Tensor):
+        masks = torch.tensor(masks, dtype=torch.uint8)
+    
+    boxes_confident = boxes[scores > score_threshold]
+    labels_confident = labels[scores > score_threshold]
+    scores_confident = scores[scores > score_threshold]
+    masks_confident = masks[scores > score_threshold] if masks is not None else None
+
     return boxes_confident, labels_confident, scores_confident, masks_confident
 
 def _get_recall_precision(scores: np.ndarray, corrects: np.ndarray,
@@ -149,8 +151,8 @@ def _average_precision(precision: np.ndarray, recall: np.ndarray,
     
     return average_precision
 
-def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores'], Tensor]],
-                       targets: List[Dict[Literal['boxes', 'labels', 'scores'], Tensor]],
+def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]],
+                       targets: List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]],
                        idx_to_class: Dict[int, str],
                        iou_threshold: float=0.5, conf_threshold: float=0.0,
                        smoothe: bool=True, precision_center: bool=False):
@@ -163,10 +165,10 @@ def average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores
     
     Parameters
     ----------
-    predictions : List[Dict[Literal['boxes', 'labels', 'scores'], Tensor]]
+    predictions : List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]]
         List of the predicted bounding boxes, labels, and scores
 
-    targets : List[Dict[Literal['boxes', 'labels'], Tensor]]
+    targets : List[Dict[Literal['boxes', 'labels'], torch.Tensor]]
         List of the true bounding boxes and labels
 
     idx_to_class : Dict[int, str]

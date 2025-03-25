@@ -1,4 +1,4 @@
-from typing import List, Literal, Any
+from typing import List, Literal, Any, Dict
 import torch
 from torchvision.utils import draw_bounding_boxes
 import matplotlib.pyplot as plt
@@ -9,26 +9,11 @@ import copy
 import numpy as np
 
 from . import detection as det
+from . import semantic_segmentation as semseg
 from ..metrics import detection as det_metrics
 from ..metrics import instance_segmentation as inst_metrics
-from . import semantic_segmentation as semseg
-
-def _convert_masks_to_seg_mask(image, masks, labels, border_mask=None, bg_idx=0, border_idx=255):
-    """Convert instance masks to a single segmentation mask."""
-    if bg_idx is None:
-        bg_idx = -1
-    seg_mask = torch.full_like(image[0, :, :], bg_idx, dtype=torch.int64)
-    accumulated_mask = torch.full_like(image[0, :, :], 0, dtype=torch.int64)
-    for mask, label in zip(masks, labels):
-        seg_mask.masked_fill_(mask.bool(), label)
-        accumulated_mask += mask
-    # occlusion
-    occulded_mask = accumulated_mask > 1
-    seg_mask.masked_fill_(occulded_mask, 254)
-    # border
-    if border_mask is not None:
-        seg_mask.masked_fill_(border_mask.bool(), border_idx)
-    return seg_mask
+from ..data_converter.instance_segmentation import convert_instance_masks_to_semantic_mask
+from torch_extend.display.semantic_segmentation import show_predicted_segmentations
 
 def show_instance_masks(image, masks, boxes=None,
                         border_mask=None,
@@ -125,7 +110,8 @@ def show_instance_masks(image, masks, boxes=None,
     # Generate a color palette for the segmentation mask
     palette = semseg.create_segmentation_palette(colors)
     # Convert instance masks to single mask
-    seg_mask = _convert_masks_to_seg_mask(image, masks, labels, border_mask, bg_idx, border_idx)
+    seg_mask = convert_instance_masks_to_semantic_mask(masks, labels, bg_idx, border_idx, border_mask,
+                                                       add_occlusion=True, occlusion_priority=None)
     # Show the mask
     segmentation_img = semseg.array1d_to_pil_image(seg_mask, palette,
                                                    bg_idx=bg_idx, border_idx=border_idx,
@@ -317,7 +303,7 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
             show_instance_masks(img, masks_conficent,
                                 boxes=None if separate_boxes else boxes_confident,
                                 scores=scores_confident, score_decimal=score_decimal,
-                                labels=torch.tensor(labels_confident), idx_to_class=idx_to_class_uk,
+                                labels=labels_confident, idx_to_class=idx_to_class_uk,
                                 bg_idx=bg_idx, border_idx=border_idx,
                                 mask_ious=mask_ious,
                                 box_ious=box_ious if separate_boxes else None,
@@ -345,4 +331,71 @@ def show_predicted_instances(imgs, preds, targets, idx_to_class,
         if max_displayed_images is not None and i >= max_displayed_images - 1:
             break
 
+    return figures
+
+def show_predicted_semantic_masks(imgs: torch.Tensor,
+                                  preds: List[Dict[Literal['masks', 'labels', 'scores'], torch.Tensor]],
+                                  targets: List[Dict[Literal['masks', 'labels'], torch.Tensor]],
+                                  idx_to_class: Dict[int, str],
+                                  bg_idx:int = 0,
+                                  border_idx:int = None,
+                                  score_threshold:float = 0.2,
+                                  occlusion_priority=None) -> List[Figure]:
+    """
+    Show predicted instance masks as semantic segmentation masks.
+
+    Parameters
+    ----------
+    preds : List[Dict[Literal['masks', 'labels', 'scores'], torch.Tensor]]
+        List of the instance segmentation prediction of Torchvision format.
+
+    targets : List[Dict[Literal['masks', 'labels'], torch.Tensor]]
+        List of the instance segmentation target of Torchvision format.
+
+    idx_to_class : Dict[int, str]
+        A dict for converting class IDs to class names.
+
+    bg_idx : int
+        The index of the background in the target mask.
+
+    border_idx : int
+        Index of the border class. The border area in the target image is ignored in the calculation or IoU.
+
+    score_threshold : float
+        The threshold of the score for the predictions used for the calculation of mean IoUs.
+
+    occlusion_priority : List[int]
+        The list of label indices that indicate the priority when the occlusion occurs.
+        The first label in the list has the highest priority.
+        If None, the priority is based on the order of the labels.
+
+    Returns
+    -------
+    figures : List[Figure]
+        List of the figures that show the predicted instance masks as semantic segmentation masks.
+    """
+    # Score thresholding of the predicted data
+    preds_confident = [
+        {'masks': pred['masks'][pred['scores'] > score_threshold],
+        'labels': pred['labels'][pred['scores'] > score_threshold]}
+        for pred in preds
+    ]
+    # Extract semantic masks from instance masks
+    pred_semantic_masks = [
+        convert_instance_masks_to_semantic_mask(
+            pred['masks'].cpu(), pred['labels'].cpu(), bg_idx, 
+            border_idx=border_idx, border_mask=None,
+            add_occlusion=False, occlusion_priority=occlusion_priority)
+        for pred in preds_confident
+    ]
+    target_semantic_masks = [
+        convert_instance_masks_to_semantic_mask(
+            target['masks'].cpu(), target['labels'].cpu(), bg_idx, 
+            border_idx=border_idx, border_mask=target['border_mask'] if 'border_mask' in target else None,
+            add_occlusion=False, occlusion_priority=occlusion_priority)
+        for target in targets
+    ]
+    # Show the predicted and target semantic segmentation masks
+    figures = show_predicted_segmentations(imgs, pred_semantic_masks, target_semantic_masks,
+                                           idx_to_class, pred_type='label', bg_idx=bg_idx, border_idx=border_idx)
     return figures
