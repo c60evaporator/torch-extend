@@ -342,7 +342,7 @@ def calc_epoch_metrics(preds, targets):
         'per_class': {
             label: {
                 'label_index': label,
-                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == bg_idx else 'unknown',
                 'tps': tps[i],
                 'fps': fps[i],
                 'fns': fns[i],

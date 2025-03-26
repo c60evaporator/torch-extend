@@ -140,7 +140,7 @@ class_to_idx = train_dataset.class_to_idx
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 bg_idx = train_dataset.bg_idx  # Background index
-border_idx = None  # Border index is None in Transformers format
+border_idx = train_dataset.border_idx  # Border index
 
 # Collate function for the DataLoader 
 def collate_fn(batch):
@@ -215,9 +215,15 @@ for i, (img, target) in enumerate(zip(imgs, targets)):
 ###### 4. Define the model ######
 from transformers import MaskFormerConfig, MaskFormerForInstanceSegmentation
 
+# Add the background index (0) if the labels are not reduced
+if REDUCE_LABELS:
+    label2id=class_to_idx
+else:
+    label2id=dict(**{'background': bg_idx}, **class_to_idx)
+id2label = {v: k for k, v in label2id.items()}
 # Load the model
 model = MaskFormerForInstanceSegmentation.from_pretrained(MODEL_NAME,
-                                                          id2label=idx_to_class,
+                                                          id2label=id2label,
                                                           ignore_mismatched_sizes=True,
                                                           no_object_weight=NO_OBJECT_WEIGHT,
                                                           dice_weight=DICE_WEIGHT,
@@ -432,7 +438,7 @@ def calc_epoch_metrics(preds, targets):
         'per_class': {
             label: {
                 'label_index': label,
-                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == bg_idx else 'unknown',
                 'tps': tps[i],
                 'fps': fps[i],
                 'fns': fns[i],
@@ -565,7 +571,8 @@ from matplotlib.colors import LogNorm
 from torch_extend.display.detection import show_average_precisions
 
 # Plot Box Average Precisions
-show_average_precisions(last_preds, last_targets, idx_to_class)
+show_average_precisions(last_preds, last_targets, idx_to_class,
+                        zero_background=not REDUCE_LABELS)
 
 # Display the confusion matrix
 label_dict = {k: v['label_name'] for k, v in last_ious['per_class'].items()}

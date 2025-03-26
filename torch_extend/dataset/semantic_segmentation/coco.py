@@ -72,7 +72,7 @@ class CocoSemanticSegmentation(ds.CocoDetection, SemanticSegOutput):
                     self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
                     self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
                     self.bg_idx = None  # Background index is ignored if `do_reduce_labels=True`
-                    self.border_idx = 255  # Background is regared as border if `do_reduce_labels=True`
+                    self.border_idx = 255  # Background is regared as border (255 in SegFormer) if `do_reduce_labels=True`
         else:
             self.processor = None
         # Chech whether all the image sizes are the same

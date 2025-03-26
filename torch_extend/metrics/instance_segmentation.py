@@ -114,6 +114,6 @@ def instance_mean_ious(preds: List[Dict[Literal['masks', 'labels', 'scores'], to
     tps, fps, fns, ious, label_indices, confmat = segmentation_ious(
             pred_semantic_masks, target_semantic_masks,
             idx_to_class, pred_type='label',
-            bg_idx=0, border_idx=border_idx)
+            bg_idx=bg_idx, border_idx=border_idx)
 
     return tps, fps, fns, ious, label_indices, confmat

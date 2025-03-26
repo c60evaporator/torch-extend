@@ -55,14 +55,17 @@ class VOCInstanceSegmentation(VOCDetection):
         super().__init__(root, idx_to_class, out_fmt, image_set, download,
                          transform, target_transform, transforms,
                          False, processor)
+        self.orig_border_idx = border_idx
         self.border_idx = border_idx
         # Background index is 0 in default
         self.bg_idx = 0
-        # If `do_reduce_labels=True` in the processor, `idx_to_class` is also reduced and back index is set to `processor.ignore_index`
-        if out_fmt == "transformers" and self.processor.do_reduce_labels:
-            self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
-            self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
-            self.bg_idx = self.processor.ignore_index
+        if out_fmt == "transformers":
+            self.border_idx = None  # Border index is not used in Transformers format
+            # If `do_reduce_labels=True` in the processor, `idx_to_class` is also reduced and background index is set to `processor.ignore_index`
+            if self.processor.do_reduce_labels:
+                self.idx_to_class = {k-1: v for k, v in self.idx_to_class.items()}
+                self.class_to_idx = {v: k for k, v in self.idx_to_class.items()}
+                self.bg_idx = self.processor.ignore_index
 
     def __len__(self) -> int:
         return len(self.images_instance)
@@ -85,13 +88,13 @@ class VOCInstanceSegmentation(VOCDetection):
         # Instance validation
         instance_ids = np.arange(1, len(labels)+1)
         mask_instances = np.unique(mask)[1:]  # Remove background (0)
-        mask_instances = mask_instances[mask_instances != self.border_idx]  # Remove border
+        mask_instances = mask_instances[mask_instances != self.orig_border_idx]  # Remove border
         if not np.array_equal(mask_instances, instance_ids):
-            print(f'Warning: Bounding box with empty mask found in image{index}, creating dummy mask.')
+            print(f'Warning: Bounding box with empty mask found in image{index}, creating dummy empty mask.')
         # Split the mask into instance masks
         masks = [(mask == instance_id).astype(np.uint8) for instance_id in instance_ids]
         # Border mask
-        border_mask = (mask == self.border_idx).astype(np.uint8)
+        border_mask = (mask == self.orig_border_idx).astype(np.uint8)
         return boxes, labels, masks, border_mask
     
     def _convert_target(self, boxes, labels, masks, border_mask, index, h, w):

@@ -153,7 +153,7 @@ bg_idx = train_dataset.bg_idx
 
 # Collate function for the DataLoader 
 def collate_fn(batch):
-    return tuple(zip(*batch))
+    return torch.stack([item[0] for item in batch]), torch.stack([item[1] for item in batch])
 # DataLoader
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
                               shuffle=True, num_workers=NUM_WORKERS,
@@ -366,7 +366,7 @@ def calc_epoch_metrics(preds, targets):
         'per_class': {
             label: {
                 'label_index': label,
-                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == bg_idx else 'unknown',
                 'tps': tps[i],
                 'fps': fps[i],
                 'fns': fns[i],

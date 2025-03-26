@@ -32,6 +32,7 @@ LR_T_MAX = EPOCHS  # For CosineAnnealingLR
 LR_PATIENCE = 10  # For ReduceLROnPlateau
 # Model Parameters
 MODEL_NAME = 'maskrcnn_resnet50_fpn'
+SEMANTIC_METRICS_SCORE_THRESHOLD = 0.2
 
 # Log Parameters
 MLFLOW_TRACKING_URI = './log/mlruns'
@@ -133,6 +134,8 @@ class_to_idx = train_dataset.class_to_idx
 num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
+bg_idx = train_dataset.bg_idx  # Background index
+border_idx = train_dataset.border_idx  # Border index
 
 # Dataloader
 def collate_fn(batch):
@@ -167,6 +170,7 @@ def show_image_and_target(img, target, ax=None):
     show_instance_masks(img, masks=masks, boxes=boxes,
                         border_mask=target['border_mask'] if 'border_mask' in target else None,
                         labels=labels,
+                        bg_idx=bg_idx, border_idx=border_idx,
                         idx_to_class=idx_to_class, ax=ax)
 
 train_iter = iter(train_dataloader)
@@ -237,7 +241,8 @@ import cv2
 import numpy as np
 import io
 
-from torch_extend.display.instance_segmentation import show_predicted_instances
+from torch_extend.display.instance_segmentation import show_predicted_instances, show_predicted_semantic_masks
+from torch_extend.metrics.instance_segmentation import instance_mean_ious
 
 def calc_train_loss(batch, model, criterion, device):
     """Calculate the training loss from the batch"""
@@ -285,6 +290,7 @@ def get_targets_cpu(targets):
 def plot_predictions(imgs, preds, targets, n_images=4):
     figures = show_predicted_instances(imgs, preds, targets, idx_to_class,
                                        border_mask=targets['border_mask'] if 'border_mask' in targets else None,
+                                       bg_idx=bg_idx, border_idx=border_idx,
                                        max_displayed_images=n_images)
     return figures
 
@@ -314,6 +320,12 @@ def validation_step(batch, batch_idx, device, model, criterion,
                     img_byte_arr = cv2.imdecode(np.frombuffer(img_byte_arr.getvalue(), np.uint8), 1)
                     img_byte_arr = img_byte_arr[:,:,::-1] # BGR->RGB
                     mlflow.log_image(img_byte_arr, key=f'img{i}', step=i_epoch)
+        # Show the semantic segmentation masks
+        SHOW_SEMANTIC_MASKS = True
+        if SHOW_SEMANTIC_MASKS:
+            show_predicted_semantic_masks(imgs, preds, targets, idx_to_class,
+                                            bg_idx=bg_idx, border_idx=border_idx,
+                                            score_threshold=SEMANTIC_METRICS_SCORE_THRESHOLD)
     return loss
 
 def calc_epoch_metrics(preds, targets):
@@ -326,8 +338,30 @@ def calc_epoch_metrics(preds, targets):
     global last_targets
     last_preds = preds
     last_targets = targets
-    print(f'MaskAP_50-95={map_score["segm_map"].item()}, MaskAP_50={map_score["segm_map_50"].item()}, BoxAP_50-95={map_score["bbox_map"].item()}, BoxAP_50={map_score["bbox_map_50"].item()}')
-    return {'MaskAP_50-95': map_score["segm_map"].item(), 'MaskAP_50': map_score["segm_map_50"].item(), 'BoxAP_50-95': map_score["bbox_map"].item(), 'BoxAP_50': map_score["bbox_map_50"].item()}
+    # Calculate semantic segmentation metrics
+    tps, fps, fns, mean_ious, label_indices, confmat = instance_mean_ious(
+        preds, targets, idx_to_class, bg_idx=bg_idx, border_idx=border_idx,
+        score_threshold=SEMANTIC_METRICS_SCORE_THRESHOLD)
+    semantic_mean_iou = np.mean(mean_ious)
+    global last_ious
+    last_ious = {
+        'per_class': {
+            label: {
+                'label_index': label,
+                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == bg_idx else 'unknown',
+                'tps': tps[i],
+                'fps': fps[i],
+                'fns': fns[i],
+                'iou': mean_ious[i],
+            }
+            for i, label in enumerate(label_indices)
+        },
+        'confmat': confmat
+    }
+    print(f'MaskAP_50-95={map_score["segm_map"].item()}, MaskAP_50={map_score["segm_map_50"].item()}, BoxAP_50-95={map_score["bbox_map"].item()}, BoxAP_50={map_score["bbox_map_50"].item()}, SemanticMeanIoU={semantic_mean_iou}')
+    return {'MaskAP_50-95': map_score["segm_map"].item(), 'MaskAP_50': map_score["segm_map_50"].item(), 
+            'BoxAP_50-95': map_score["bbox_map"].item(), 'BoxAP_50': map_score["bbox_map_50"].item(),
+            'SemanticMeanIoU': semantic_mean_iou}
 
 def train_one_epoch(loader, device, model,
                     criterion, optimizer, lr_scheduler):
@@ -437,10 +471,27 @@ preds, targets = val_predict((imgs, targets), device, model)
 imgs = [denormalize_image(img, eval_transform) for img in imgs]
 plot_predictions(imgs, preds, targets)
 
-#%% Plot Box Average Precisions
-# Plot Box Average Precisions
+#%% Plot Box Average Precisions, Semantic IOUs, and Confusion Matrix
+# Plot Box Average Precisions, Semantic IOUs, and Confusion Matrix
+import pandas as pd
+import seaborn as sns
+from matplotlib.colors import LogNorm
 from torch_extend.display.detection import show_average_precisions
 
+# Plot Box Average Precisions
 show_average_precisions(last_preds, last_targets, idx_to_class)
+
+# Display the confusion matrix
+label_dict = {k: v['label_name'] for k, v in last_ious['per_class'].items()}
+df_confmat = pd.DataFrame(last_ious['confmat'], index=label_dict.values(), columns=label_dict.values())
+plt.figure(figsize=(len(label_dict), len(label_dict)*0.8))
+sns.heatmap(df_confmat, annot=True, fmt=".2g", cmap='Blues', norm=LogNorm())
+plt.xlabel('Predicted', fontsize=16)
+plt.ylabel('True', fontsize=16)
+plt.title('Confusion Matrix', fontsize=20)
+plt.show()
+
+# Display the Semantic IOUs
+print(pd.DataFrame([v for v in last_ious['per_class'].values()]))
 
 # %%

@@ -132,7 +132,6 @@ val_dataset = VOCSemanticSegmentation(DATA_ROOT, image_set='val',
                                       out_fmt='transformers', processor=image_processor)
 # Class to index dict
 class_to_idx = train_dataset.class_to_idx
-num_classes = max(class_to_idx.values()) + 1
 # Index to class dict
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 bg_idx = train_dataset.bg_idx  # Background index
@@ -192,11 +191,14 @@ for i, (img, target) in enumerate(zip(imgs, targets)):
 ###### 4. Define the model ######
 from transformers import SegformerForSemanticSegmentation
 
-# Load the model
-label2id=dict(**{'background': bg_idx}, **class_to_idx)  # Add the background index
+# Add the background index (0) if the labels are not reduced
+if REDUCE_LABELS:
+    label2id=class_to_idx
+else:
+    label2id=dict(**{'background': bg_idx}, **class_to_idx)
 id2label = {v: k for k, v in label2id.items()}
+# Load the model
 model = SegformerForSemanticSegmentation.from_pretrained(MODEL_NAME,
-                                                         num_labels=num_classes,
                                                          id2label=id2label,
                                                          label2id=label2id)
 
@@ -339,7 +341,7 @@ def calc_epoch_metrics(preds, targets):
         'per_class': {
             label: {
                 'label_index': label,
-                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == 0 else 'unknown',
+                'label_name': idx_to_class[label] if label in idx_to_class.keys() else 'background' if label == bg_idx else 'unknown',
                 'tps': tps[i],
                 'fps': fps[i],
                 'fns': fns[i],
@@ -455,9 +457,11 @@ plt.show()
 #%% Plot predicted segmentation in the first minibatch of the validation dataset
 model.eval()  # Set the evaluation mode
 val_iter = iter(val_dataloader)
-imgs, targets = next(val_iter)
-preds, targets = val_predict((imgs, targets), device, model)
-imgs = [denormalize_image(img, eval_transform) for img in imgs]
+batch = next(val_iter)
+preds, labels = val_predict(batch, device, model)
+preds, targets = convert_preds_targets_to_torchvision(preds, labels, device)
+imgs = convert_images_for_pred_to_torchvision(batch)
+imgs = [denormalize_image(img, eval_transform, image_processor) for img in imgs]
 plot_predictions(imgs, preds, targets)
 
 #%% Display IOUs and Cofusion Matrix

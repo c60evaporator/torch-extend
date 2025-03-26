@@ -225,6 +225,7 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
 def show_average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]],
                             targets: List[Dict[Literal['boxes', 'labels', 'scores'], torch.Tensor]],
                             idx_to_class: Dict[int, str],
+                            zero_background: bool=True,
                             iou_thresholds: List[float]=None,
                             shown_iou: float=0.5,
                             rec_thresholds: List[float]=None,
@@ -242,6 +243,9 @@ def show_average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 's
 
     idx_to_class : Dict[int, str]
         A dict for converting class IDs to class names.
+
+    zero_background : bool
+        If True, the label index of output metrics is reduced by 1 compared to `idx_to_class`. Typically, this is set to `True` when the background class is 0 and other classes are 1, 2, 3, ...
 
     iou_thresholds : List[float]
         IoU thresholds for evaluation. If set to `None` it corresponds to the stepped range `[0.5,...,0.95]` with step `0.05`. Else provide a list of floats.
@@ -276,10 +280,11 @@ def show_average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 's
     fig_mean, ax_mean = plt.subplots(1, 1, figsize=(8, 8))
 
     for idx, (ap, precisions) in enumerate(zip(class_aps, class_precisions)):
+        displayed_idx = idx + 1 if zero_background else idx
         # Show each label's PR Curve and average precision
         fig, ax = plt.subplots(1, 1, figsize=(4, 4))
         ax.plot(np.append(recalls, 1.0), np.append(precisions.tolist(), 0.0))
-        ax.set_title(f"{idx_to_class[idx+1]}, index={idx+1}")
+        ax.set_title(f"{idx_to_class[displayed_idx]}, index={displayed_idx}")
         ax.set_xlim(0, 1.1)
         ax.set_ylim(0, 1.1)
         ax.text(1.08, 1.08,
@@ -287,7 +292,7 @@ def show_average_precisions(predictions: List[Dict[Literal['boxes', 'labels', 's
                 verticalalignment='top', horizontalalignment='right')
         fig.show()
         # Plot PR Curve on the mean average precision graph
-        ax_mean.plot(np.append(recalls, 1.0), np.append(precisions.tolist(), 0.0), label=idx_to_class[idx+1])
+        ax_mean.plot(np.append(recalls, 1.0), np.append(precisions.tolist(), 0.0), label=idx_to_class[displayed_idx])
 
     ax_mean.set_title(f'mean Average Precision (mAP) @IoU={shown_iou}')
     ax_mean.set_xlim(0, 1.1)
