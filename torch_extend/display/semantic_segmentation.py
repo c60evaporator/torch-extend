@@ -82,9 +82,9 @@ def show_segmentation(image, target,
 
     Parameters
     ----------
-    image : torch.Tensor (ch, x, y)
+    image : torch.Tensor (C, H, W)
         Input image
-    target : torch.Tensor (x, y)
+    target : torch.Tensor (H, W)
         Target segmentation class with Torchvision segmentation format 
     alpha : float
         Transparency of the segmentation 
@@ -159,9 +159,9 @@ def show_segmentations(image, target,
 
     Parameters
     ----------
-    image : torch.Tensor (ch, x, y)
+    image : torch.Tensor (C, H, W)
         Input image with 256 color indices
-    target : torch.Tensor (x, y)
+    target : torch.Tensor (H, W)
         Target segmentation class with Torchvision segmentation format 
     alpha : float
         Transparency of the segmentation 
@@ -204,14 +204,14 @@ def show_predicted_segmentations(imgs, preds, targets, idx_to_class,
     imgs : torch.Tensor (B, C, H, W)
         Images which are standardized to [0, 1]
     
-    preds : List[Tensor(class, H, W)] or Tensor(B, class, H, W)
-        List of the prediction result.
+    preds : List[Tensor(class, H, W)], List[Tensor(B, class, H, W)], List[Tensor(H, W)], or List[Tensor(B, H, W)]
+        List of the predicted segmentation results.
 
-        If `pred_type` is 'logit', preds are the logit values of List[Tensor(class, H, W)] or Tensor(B, class, H, W).
+        If `pred_type` is 'logit', preds are the logit values of List[Tensor(class, H, W)] or List[Tensor(B, class, H, W)].
 
-        If `pred_type` is 'label', preds are the predicted labels of List[Tensor(H, W)] or Tensor(B, H, W).
+        If `pred_type` is 'label', preds are the predicted labels of List[Tensor(H, W)] or List[Tensor(B, H, W)].
     
-    targets : torch.Tensor (image_idx x H x W) (TorchVision segmentation target format)
+    targets : List[Tensor(H, W)] or List[Tensor(B, H, W)]
         Ground truths which indicates the label index of each pixel
     
     idx_to_class : Dict[int, str]

@@ -10,7 +10,7 @@ import tqdm
 def segmentation_ious_one_image_or_batch(pred: Tensor, target: Tensor, label_indices: List[int], border_idx:int = None,
                                          confmat_calc_platform: Literal['sklearn', 'torch'] = 'sklearn'):
     """
-    Calculate segmentation IoUs, TP, FP, FN in one image or batch
+    Calculate segmentation IoUs, TP, FP, FN in a image or a batch
 
     Reference: https://stackoverflow.com/questions/31653576/how-to-calculate-the-mean-iu-score-in-image-segmentation
     
@@ -81,14 +81,14 @@ def segmentation_ious(preds: List[Tensor],
 
     Parameters
     ----------
-    preds : List[Tensor(class, H, W)] or List[Tensor(B, class, H, W)]
+    preds : List[Tensor(class, H, W)], List[Tensor(B, class, H, W)], List[Tensor(H, W)], or List[Tensor(B, H, W)]
         List of the predicted segmentation images.
 
-        If `pred_type` is 'logit', preds are the logit values of List[Tensor(class, H, W)] or Tensor(B, class, H, W).
+        If `pred_type` is 'logit', preds are the logit values of List[Tensor(class, H, W)] or List[Tensor(B, class, H, W)].
 
-        If `pred_type` is 'label', preds are the predicted labels of List[Tensor(H, W)] or Tensor(B, H, W).
+        If `pred_type` is 'label', preds are the predicted labels of List[Tensor(H, W)] or List[Tensor(B, H, W)].
 
-    targets : List[Tensor(H, W)] or List[Tensor(B, class, H, W)]
+    targets : List[Tensor(H, W)] or List[Tensor(B, H, W)]
         List of the true segmentation images
 
     idx_to_class : Dict[int, str]

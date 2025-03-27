@@ -120,7 +120,7 @@ def show_predicted_bboxes(imgs, preds, targets, idx_to_class,
 
     Parameters
     ----------
-    imgs : List[torch.Tensor (C x H x W)]
+    imgs : List[torch.Tensor (C, H, W)] or List[torch.Tensor (B, C, H, W)]
         List of images that are standardized to [0, 1]
     preds : Dict[str, Any] (TorchVision detection prediction format)
         List of prediction results. The format should be as follows.
