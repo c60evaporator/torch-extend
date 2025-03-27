@@ -43,14 +43,13 @@ def mask_iou(mask_pred, label_pred, masks_true, labels_true,
         max_iou = 0.0
     return max_iou
 
-import matplotlib.pyplot as plt
-
 def instance_mean_ious(preds: List[Dict[Literal['masks', 'labels', 'scores'], torch.Tensor]],
                        targets: List[Dict[Literal['masks', 'labels'], torch.Tensor]],
                        idx_to_class: Dict[int, str],
                        bg_idx:int = 0,
                        border_idx:int = None,
-                       score_threshold:float = 0.2):
+                       score_threshold:float = 0.2,
+                       confmat_calc_platform: Literal['sklearn', 'torch'] = 'sklearn'):
     """
     Calculate the mean IoUs of the predicted masks for instance segmentation.
 
@@ -73,6 +72,9 @@ def instance_mean_ious(preds: List[Dict[Literal['masks', 'labels', 'scores'], to
 
     score_threshold : float
         The threshold of the score for the predictions used for the calculation of mean IoUs.
+
+    confmat_calc_platform : Literal['sklearn', 'torch']
+        The platform for calculating the confusion matrix. 'sklearn' is a bit faster generally, but 'torch' is much faster if it is called by Pytorch Lightning.
 
     Returns
     -------
@@ -114,6 +116,7 @@ def instance_mean_ious(preds: List[Dict[Literal['masks', 'labels', 'scores'], to
     tps, fps, fns, ious, label_indices, confmat = segmentation_ious(
             pred_semantic_masks, target_semantic_masks,
             idx_to_class, pred_type='label',
-            bg_idx=bg_idx, border_idx=border_idx)
+            bg_idx=bg_idx, border_idx=border_idx,
+            confmat_calc_platform=confmat_calc_platform)
 
     return tps, fps, fns, ious, label_indices, confmat

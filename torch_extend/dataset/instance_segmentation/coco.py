@@ -43,6 +43,7 @@ class CocoInstanceSegmentation(CocoDetection):
         processor: Optional[BaseImageProcessor] = None
     ) -> None:
         super().__init__(root, annFile, out_fmt, transform, target_transform, transforms, False, processor)
+        self.border_idx = None  # Border index is not used in COCO format
         # Background index is 0 in default
         self.bg_idx = 0
         if out_fmt == "transformers":

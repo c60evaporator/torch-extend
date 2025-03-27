@@ -7,7 +7,8 @@ import numpy as np
 import time
 import tqdm
 
-def segmentation_ious_one_image_or_batch(labels_pred: Tensor, target: Tensor, label_indices: List[int], border_idx:int = None):
+def segmentation_ious_one_image_or_batch(pred: Tensor, target: Tensor, label_indices: List[int], border_idx:int = None,
+                                         confmat_calc_platform: Literal['sklearn', 'torch'] = 'sklearn'):
     """
     Calculate segmentation IoUs, TP, FP, FN in one image or batch
 
@@ -15,7 +16,7 @@ def segmentation_ious_one_image_or_batch(labels_pred: Tensor, target: Tensor, la
     
     Parameters
     ----------
-    labels_pred : Tensor(H, W) or Tensor(B, H, W)
+    pred : Tensor(H, W) or Tensor(B, H, W)
         The predicted labels of each pixel
 
     target : Tensor(H, W) or Tensor(B, H, W)
@@ -26,14 +27,39 @@ def segmentation_ious_one_image_or_batch(labels_pred: Tensor, target: Tensor, la
 
     border_idx : int
         Index of the border class. The border area in the target image is ignored in the calculation or IoU.
+
+    confmat_calc_platform : Literal['sklearn', 'torch']
+        The platform for calculating the confusion matrix. 'sklearn' is a bit faster generally, but 'torch' is much faster if it is called by Pytorch Lightning.
     """
-    labels_flatten = labels_pred.cpu().detach().numpy().flatten()
-    target_flatten = target.cpu().detach().numpy().flatten()
+    # Flatten the predicted and target labels
+    pred_flatten = pred.cpu().detach().flatten()
+    target_flatten = target.cpu().detach().flatten()
     # The border area in the target image is ignored in the calculation or IoU
     if border_idx is not None:
-        labels_flatten = labels_flatten[target_flatten != border_idx]
+        pred_flatten = pred_flatten[target_flatten != border_idx]
         target_flatten = target_flatten[target_flatten != border_idx]
-    confmat = confusion_matrix(target_flatten, labels_flatten, labels=label_indices)
+    # Calculate the confusion matrix by Pytorch
+    # `sklearn.metrics.confusion_matrix()` takes much time for label re-rodering when it is called by Pytorch Lightning. Calculate the confusion matrix by Pytorch is faster in this case.
+    if confmat_calc_platform == 'torch':
+        confmat = torch.zeros((len(label_indices), len(label_indices)), dtype=torch.int64)
+        label_to_ind = {label: i for i, label in enumerate(label_indices)}
+        pred_unique = pred_flatten.unique().tolist()
+        target_unique = target_flatten.unique().tolist()
+        for target_label in target_unique:
+            for pred_label in pred_unique:
+                confmat[label_to_ind[target_label]][label_to_ind[pred_label]] = (
+                    (target_flatten == target_label) & (pred_flatten == pred_label)).sum().item()
+        confmat = confmat.numpy()
+    
+    # Calculate the confusion matrix by sklearn
+    elif confmat_calc_platform == 'sklearn':
+        pred_flatten = pred_flatten.numpy()
+        target_flatten = target_flatten.numpy()
+        confmat = confusion_matrix(target_flatten, pred_flatten, labels=label_indices)
+    else:
+        raise ValueError('The `calc_platform` must be either "torch" or "sklearn".')
+    
+    # Calculate the IoUs, TPs, FPs, FNs
     tps = np.diag(confmat)
     gts = np.sum(confmat, axis=1)  # Number of pixels of each class in the target
     preds = np.sum(confmat, axis=0)
@@ -48,7 +74,8 @@ def segmentation_ious(preds: List[Tensor],
                       idx_to_class: Dict[int, str],
                       pred_type: Literal['label', 'logit'] = 'logit',
                       bg_idx:int = 0,
-                      border_idx:int = None):
+                      border_idx:int = None,
+                      confmat_calc_platform: Literal['sklearn', 'torch'] = 'sklearn'):
     """
     Calculate mean IoUs of each class label
 
@@ -75,6 +102,9 @@ def segmentation_ious(preds: List[Tensor],
 
     border_idx : int
         Index of the border class. The border area in the target image is ignored in the calculation or IoU.
+
+    confmat_calc_platform : Literal['sklearn', 'torch']
+        The platform for calculating the confusion matrix. 'sklearn' is a bit faster generally, but 'torch' is much faster if it is called by Pytorch Lightning.
 
     Returns
     -------
@@ -131,7 +161,8 @@ def segmentation_ious(preds: List[Tensor],
             raise ValueError('The `pred_type` must be either "label" or "logit".')
         # Calculate the IoUs
         ious, tps, fps, fns, confmat = segmentation_ious_one_image_or_batch(
-            labels_pred, target, label_indices=label_indices, border_idx=border_idx)
+            labels_pred, target, label_indices=label_indices, border_idx=border_idx,
+            confmat_calc_platform=confmat_calc_platform)
         tps_batch.append(tps)
         fps_batch.append(fps)
         fns_batch.append(fns)
