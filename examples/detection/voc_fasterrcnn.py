@@ -120,6 +120,7 @@ import matplotlib.pyplot as plt
 
 from torch_extend.dataset import VOCDetection
 from torch_extend.display.detection import show_bounding_boxes
+from torch_extend.data_converter.common import denormalize_image
 
 # Dataset
 train_dataset = VOCDetection(DATA_ROOT, image_set='train', download=True,
@@ -141,18 +142,6 @@ train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE,
 val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
                             shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=collate_fn)
-
-# Denormalize the image
-def denormalize_image(img, transform):
-    # Denormalization based on the transforms
-    for tr in transform.transforms:
-        if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
-            reverse_transform = v2.Compose([
-                v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
-                                    std=[1/std for std in tr.std])
-            ])
-            img = reverse_transform(img)
-    return img
 
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
@@ -308,6 +297,8 @@ def validation_step(batch, batch_idx, device, model, criterion,
                     img_byte_arr = cv2.imdecode(np.frombuffer(img_byte_arr.getvalue(), np.uint8), 1)
                     img_byte_arr = img_byte_arr[:,:,::-1] # BGR->RGB
                     mlflow.log_image(img_byte_arr, key=f'img{i}', step=i_epoch)
+        # Close the figures to prevent memory leak
+        plt.close('all')
     return loss
 
 def calc_epoch_metrics(preds, targets):

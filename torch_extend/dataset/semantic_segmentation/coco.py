@@ -49,8 +49,9 @@ class CocoSemanticSegmentation(ds.CocoDetection, SemanticSegOutput):
             v['id']: v['name']
             for k, v in self.coco.cats.items()
         }
+        # Fill the missing indexes
         na_cnt = 0
-        for i in range(max(self.idx_to_class.keys())):
+        for i in range(1, max(self.idx_to_class.keys())):  # 0 is reserved for background
             if i not in self.idx_to_class.keys():
                 na_cnt += 1
                 self.idx_to_class[i] = f'NA{"{:02}".format(na_cnt)}'

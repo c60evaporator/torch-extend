@@ -29,9 +29,12 @@ def convert_instance_masks_to_semantic_mask(masks, labels,
     """
     if bg_idx is None:
         bg_idx = -1
+    # Send the masks and labels to the CPU
+    masks = masks.cpu().detach()
+    labels = labels.cpu().detach()
     # If occlusion_priority is None, set the priority based on the order of the labels
     if occlusion_priority is None:
-        occlusion_priority = torch.unique(labels).cpu().detach().numpy().tolist()
+        occlusion_priority = torch.unique(labels).numpy().tolist()
     # Sort the masks and labels based on the occlusion priority (Reverse order)
     indices_priority = [occlusion_priority.index(label.item()) for label in labels]
     sorted_labels = [label for _, label in sorted(zip(indices_priority, labels), key=lambda x: x[0], reverse=True)]

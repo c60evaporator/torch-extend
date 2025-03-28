@@ -115,6 +115,7 @@ import matplotlib.pyplot as plt
 
 from torch_extend.dataset import CocoInstanceSegmentation
 from torch_extend.display.instance_segmentation import show_instance_masks
+from torch_extend.data_converter.common import denormalize_image
 
 # Dataset
 TRAIN_ANNFILE='../detection/datasets/COCO/instances_train_filtered.json'
@@ -146,18 +147,6 @@ train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE,
 val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
                             shuffle=False, num_workers=NUM_WORKERS,
                             collate_fn=collate_fn)
-
-# Denormalize the image
-def denormalize_image(img, transform):
-    # Denormalization based on the transforms
-    for tr in transform.transforms:
-        if isinstance(tr, v2.Normalize) or isinstance(tr, A.Normalize):
-            reverse_transform = v2.Compose([
-                v2.Normalize(mean=[-mean/std for mean, std in zip(tr.mean, tr.std)],
-                                    std=[1/std for std in tr.std])
-            ])
-            img = reverse_transform(img)
-    return img
 
 # Display the first minibatch
 def show_image_and_target(img, target, ax=None):
@@ -326,6 +315,8 @@ def validation_step(batch, batch_idx, device, model, criterion,
             show_predicted_semantic_masks(imgs, preds, targets, idx_to_class,
                                             bg_idx=bg_idx, border_idx=border_idx,
                                             score_threshold=SEMANTIC_METRICS_SCORE_THRESHOLD)
+        # Close the figures to prevent memory leak
+        plt.close('all')
     return loss
 
 def calc_epoch_metrics(preds, targets):
