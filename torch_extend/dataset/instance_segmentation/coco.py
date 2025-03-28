@@ -140,4 +140,4 @@ class CocoInstanceSegmentation(CocoDetection):
         # Output as Transformers format
         # If the output image sizes are different, `processor.pad(pixel_values, return_tensors="pt")` should be applied in `collate_fn` of the DataLoader.
         elif self.out_fmt == "transformers":
-            return convert_image_target_to_transformers(image, target, index, self.processor, out_fmt='maskformer')
+            return convert_image_target_to_transformers(image, target, self.processor, self.same_img_size, out_fmt='maskformer')
