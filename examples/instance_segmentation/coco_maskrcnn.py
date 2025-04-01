@@ -270,6 +270,7 @@ def get_preds_cpu(preds):
     """Get the predictions and store them to CPU as a list"""
     return [{k: v.cpu() for k, v in pred.items()} 
             for pred in preds]
+    #TODO:Memory usage exceeds 64GB for COCO val dataset
 
 def get_targets_cpu(targets):
     """Get the targets and store them to CPU as a list"""
