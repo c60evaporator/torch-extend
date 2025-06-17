@@ -156,11 +156,35 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
     transforms : callable, optional
         A function/transform that takes input sample and its target as entry and returns a transformed version.
     reduce_labels : bool
-        If True, the label 0 is regarded as the background and all the labels will be reduced by 1. Also, the class_to_idx will
+        If True, the label 0 is regarded as the background and all the labels will be reduced by 1. Also, the class_to_idx will be updated accordingly.
 
         For example, if the labels are [1, 3] and the class_to_idx is {1: 'aeroplane', 2: 'bicycle', 3: 'bird'}, the labels will be [0, 2] and the class_to_idx will be {0: 'aeroplane', 1: 'bicycle', 2: 'bird'}.
     processor : callable, optional
         An image processor instance for HuggingFace Transformers. Only available if ``out_fmt="transformers"``.
+
+    The dataset folder structure should be like this:
+    ```
+    root/  <-- This folder should be set as `root`
+        ├── Annotations/
+        │   ├── image001.xml
+        │   ├── image002.xml
+        │   └── ...
+        ├── ImageSets/
+        │   ├── Main/
+        │   │   ├── train.txt
+        │   │   ├── val.txt
+        │   │   └── ...
+        │   └── (Segmentation/)
+        │       └── ...
+        ├── JPEGImages/
+        │   ├── image001.jpg
+        │   ├── image002.jpg
+        │   └── ...
+        ├── (SegmentationClass/)
+        │   └── ...
+        └── (SegmentationObject/)
+            └── ...
+    ```
     """
 
     def __init__(
@@ -168,7 +192,7 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
         root: str,
         idx_to_class : Dict[int, str] = None,
         out_fmt: Literal["torchvision", "transformers"] = "torchvision",
-        image_set: str = "train",
+        image_set: Literal["train", "val"] = "train",
         download: bool = False,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
@@ -201,7 +225,7 @@ class VOCDetection(VOCBaseTV, DetectionOutput):
                 self.processor = processor
         else:
             self.processor = None
-        # Chech whether all the image sizes are the same
+        # Check whether all the image sizes are the same
         image_transform = self.transforms if self.transforms is not None else self.transform
         self.same_img_size = validate_same_img_size(image_transform, self.processor)
 

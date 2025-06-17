@@ -30,11 +30,27 @@ class CocoDetection(ds.CocoDetection, DetectionOutput):
     transforms : callable, optional
         A function/transform that takes input sample and its target as entry and returns a transformed version.
     reduce_labels : bool
-        If True, the label 0 is regarded as the background and all the labels will be reduced by 1. Also, the class_to_idx will
+        If True, the label 0 is regarded as the background and all the labels will be reduced by 1. Also, the class_to_idx will be updated accordingly.
 
         For example, if the labels are [1, 3] and the class_to_idx is {1: 'aeroplane', 2: 'bicycle', 3: 'bird'}, the labels will be [0, 2] and the class_to_idx will be {0: 'aeroplane', 1: 'bicycle', 2: 'bird'}.
     processor : callable, optional
         An image processor instance for HuggingFace Transformers. Only available if ``out_fmt="transformers"``.
+
+    The dataset folder structure should be like this:
+    ```
+    root/
+        ├── annotations/
+        │   ├── instances_train2017.json <-- This file should be set as `annFile` if the dataset is for training
+        │   ├── instances_val2017.json <-- This file should be set as `annFile` if the dataset is for validation
+        │   └── ...
+        ├── train2017/ <-- This folder should be set as `root` if the dataset is for training
+        │   ├── 000000000001.jpg
+        │   ├── 000000000002.jpg
+        │   └── ...
+        └── val2017/ <-- This folder should be set as `root` if the dataset is for validation
+            ├── 000000010001.jpg
+            ├── 000000010002.jpg
+            └── ...
     """
     def __init__(
         self,
@@ -76,7 +92,7 @@ class CocoDetection(ds.CocoDetection, DetectionOutput):
                 self.processor = processor
         else:
             self.processor = None
-        # Chech whether all the image sizes are the same
+        # Check whether all the image sizes are the same
         image_transform = self.transforms if self.transforms is not None else self.transform
         self.same_img_size = validate_same_img_size(image_transform, self.processor)
 
